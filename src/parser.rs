@@ -13,15 +13,28 @@ impl Parser {
     fn parse_additive(&mut self) -> Result<Expr, String> {
         let mut expr = self.parse_multiplicative()?;
 
-        while let Some(token) = self.peek() {
-            match token {
-                Token::Plus | Token::Minus => {
+        while self.peek().is_some() {
+            match self.peek().unwrap() {
+                Token {
+                    ty: Ty::Plus,
+                    span: _,
+                }
+                | Token {
+                    ty: Ty::Minus,
+                    span: _,
+                } => {
                     self.advance();
                     let rhs = self.parse_multiplicative()?;
                     expr = Expr::BinaryOp {
-                        op: match token {
-                            Token::Plus => BinOp::Add,
-                            Token::Minus => BinOp::Subtract,
+                        op: match self.peek().unwrap() {
+                            Token {
+                                ty: Ty::Plus,
+                                span: _,
+                            } => BinOp::Add,
+                            Token {
+                                ty: Ty::Minus,
+                                span: _,
+                            } => BinOp::Subtract,
                             _ => unreachable!(),
                         },
                         lhs: Box::new(expr),
@@ -38,15 +51,28 @@ impl Parser {
     fn parse_multiplicative(&mut self) -> Result<Expr, String> {
         let mut expr = self.parse_primary()?;
 
-        while let Some(token) = self.peek() {
-            match token {
-                Token::Star | Token::Slash => {
+        while self.peek().is_some() {
+            match self.peek().unwrap() {
+                Token {
+                    ty: Ty::Asterisk,
+                    span: _,
+                }
+                | Token {
+                    ty: Ty::Slash,
+                    span: _,
+                } => {
                     self.advance();
                     let rhs = self.parse_primary()?;
                     expr = Expr::BinaryOp {
-                        op: match token {
-                            Token::Star => BinOp::Multiply,
-                            Token::Slash => BinOp::Divide,
+                        op: match self.peek().unwrap() {
+                            Token {
+                                ty: Ty::Asterisk,
+                                span: _,
+                            } => BinOp::Multiply,
+                            Token {
+                                ty: Ty::Slash,
+                                span: _,
+                            } => BinOp::Divide,
                             _ => unreachable!(),
                         },
                         lhs: Box::new(expr),
@@ -64,21 +90,21 @@ impl Parser {
         match self.advance() {
             Some(Token {
                 ty: Ty::Number(n),
-                span,
-            }) => Ok(todo!()),
+                span: _,
+            }) => Ok(Expr::Number(*n)),
             Some(Token {
                 ty: Ty::Identifier(name),
-                span,
+                span: _,
             }) => Ok(Expr::Variable(name.clone())),
             Some(Token {
                 ty: Ty::LParen,
-                span,
+                span: _,
             }) => {
                 let expr = self.parse_expr()?;
                 match self.advance() {
                     Some(Token {
                         ty: Ty::RParen,
-                        span,
+                        span: _,
                     }) => Ok(expr),
                     _ => Err("Expected ')' after expression".to_string()),
                 }

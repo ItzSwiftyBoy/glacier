@@ -1,7 +1,7 @@
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone)]
 pub struct Span {
-    start: usize,
-    end: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
 impl Span {
@@ -27,6 +27,10 @@ pub enum TokenType {
     LessThanEqual,
     GreaterThanEqual,
     RightFatArrow,
+    Plus,
+    Minus,
+    Asterisk,
+    Slash,
 
     KVariable,
     KMutable,
@@ -34,7 +38,7 @@ pub enum TokenType {
     KStruct,
     KClass,
 
-    Number(String), // TODO: Make String -> i64
+    Number(i64), // TODO: Have 'Integer(i64)' & 'Float(f64)' instead of 'Number(i64)'
 
     Identifier(String),
 

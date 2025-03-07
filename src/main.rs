@@ -1,13 +1,16 @@
+use compiler::Compiler;
+
+mod compiler;
+mod diagnostic;
 mod utils;
 
 mod lexer;
-use lexer::Lexer;
 
 mod ast;
 mod parser;
 
 fn main() {
-    let mut lexer = Lexer::new("var mut x = 36..6");
-    let tokens = lexer.next_token();
-    println!("{:#?}", tokens);
+    let source = "var mut x = 36";
+    let compiler = Compiler::new(source);
+    compiler.compile();
 }
