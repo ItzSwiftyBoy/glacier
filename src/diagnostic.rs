@@ -1,52 +1,56 @@
+use std::ops::Index;
+
 use crate::utils::Span;
+use colored::Colorize;
 
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone)]
 pub enum DiagnosticLevel {
     Error,
     Warning,
-    Note,
-    Hint,
 }
 
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone)]
 pub struct Diagnostic {
     pub level: DiagnosticLevel,
     pub message: String,
-    pub span: Option<Span>,
+    pub span: Span,
+    pub note: Vec<String>,
+    pub hint: Vec<String>,
 }
 
 impl Diagnostic {
-    pub fn new(level: DiagnosticLevel, message: String) -> Self {
+    pub fn new(level: DiagnosticLevel, message: String, span: Span) -> Self {
         Self {
             level,
             message,
-            span: None,
+            span,
+            note: vec![],
+            hint: vec![],
         }
     }
 
-    pub fn with_span(mut self, span: Span) -> Self {
-        self.span = Some(span);
+    pub fn with_note(mut self, note: String) -> Self {
+        self.note.push(note);
         self
     }
 
-    pub fn build(self) -> Self {
-        Self {
-            level: self.level,
-            message: self.message,
-            span: self.span,
-        }
+    pub fn with_hint(mut self, hint: String) -> Self {
+        self.hint.push(hint);
+        self
     }
 }
 
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone)]
 pub struct DiagnosticReporter {
     diagnostics: Vec<Diagnostic>,
+    curr: usize,
 }
 
 impl DiagnosticReporter {
     pub fn new() -> Self {
         Self {
             diagnostics: Vec::new(),
+            curr: 0,
         }
     }
 
@@ -54,25 +58,34 @@ impl DiagnosticReporter {
         self.diagnostics.push(diagnostic);
     }
 
-    pub fn report(&self, source: &'static str) {
+    pub fn report(&self, source: &str) {
         for diagnostic in &self.diagnostics {
             match diagnostic.level {
-                DiagnosticLevel::Error => eprintln!("Error: {}", diagnostic.message),
+                DiagnosticLevel::Error => {
+                    eprint!(
+                        "{}: {}",
+                        "Error".red().bold(),
+                        format!("{}", diagnostic.message).bright_white().bold()
+                    )
+                }
                 DiagnosticLevel::Warning => eprintln!("Warning: {}", diagnostic.message),
-                DiagnosticLevel::Note => eprintln!("Note: {}", diagnostic.message),
-                DiagnosticLevel::Hint => eprintln!("Hint: {}", diagnostic.message),
             }
 
-            if let Some(span) = &diagnostic.span {
-                // Extract the relevant line and column from the source code
-                let (line, column) = self.get_line_and_column(source, span.start);
-                let line_content = self.get_line_content(source, span.start);
+            let span = &diagnostic.span;
+            let (line, column) = self.get_line_and_column(source, span.start);
+            let line_content = {
+                let start = source[..span.start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+                let end = source[span.start..]
+                    .find('\n')
+                    .map(|i| span.start + i)
+                    .unwrap_or(source.len());
+                &source[start..end]
+            };
 
-                eprintln!("  at line {}, column {}", line, column);
-                eprintln!("  |");
-                eprintln!("{} | {}", line, line_content);
-                eprintln!("  | {:>width$}", "^", width = column + 1);
-            }
+            eprintln!("\t{}", format!("{}:{}", line, column).bright_white().bold());
+            eprintln!("  |");
+            eprintln!("{} |  {}", line, line_content);
+            eprintln!("  |  {:>width$}", "^", width = column);
         }
     }
 
@@ -93,14 +106,15 @@ impl DiagnosticReporter {
         }
         (line, column)
     }
+}
 
-    // Helper function to get the content of the line containing the span
-    fn get_line_content(&self, source: &'static str, index: usize) -> &'static str {
-        let start = source[..index].rfind('\n').map(|i| i + 1).unwrap_or(0);
-        let end = source[index..]
-            .find('\n')
-            .map(|i| index + i)
-            .unwrap_or(source.len());
-        &source[start..end]
+impl Iterator for DiagnosticReporter {
+    type Item = Diagnostic;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.curr == self.diagnostics.len() {
+            return None;
+        }
+        self.curr += 1;
+        Some(self.diagnostics.index(self.curr - 1).clone())
     }
 }

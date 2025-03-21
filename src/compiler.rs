@@ -9,9 +9,14 @@ impl<'a> Compiler<'a> {
         Self { source }
     }
 
-    pub fn compile(&self) {
-        let mut lexer = Lexer::new(self.source);
-        let tokens = lexer.next_token();
+    pub fn compile(&'a self) {
+        let mut diagnostics = DiagnosticReporter::new();
+        let lexer = Lexer::new(self.source).identify_tokens();
+        let tokens = lexer.0;
+        for diagnostic in lexer.1 {
+            diagnostics.add(diagnostic);
+        }
+        diagnostics.report(self.source);
         println!("{:#?}", tokens);
     }
 }

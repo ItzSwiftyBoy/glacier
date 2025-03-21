@@ -10,7 +10,7 @@ mod ast;
 mod parser;
 
 fn main() {
-    let source = "var mut x = 36";
+    let source = "$";
     let compiler = Compiler::new(source);
     compiler.compile();
 }

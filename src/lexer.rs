@@ -1,5 +1,5 @@
 use crate::{
-    diagnostic::{Diagnostic, DiagnosticReporter},
+    diagnostic::{Diagnostic, DiagnosticLevel, DiagnosticReporter},
     utils::{Span, Token, TokenType as Ty},
 };
 
@@ -7,7 +7,6 @@ use crate::{
 pub struct Lexer<'a> {
     source: &'a str,
     cursor_index: usize,
-    diagnostics: DiagnosticReporter,
 }
 
 impl<'a> Lexer<'a> {
@@ -15,184 +14,125 @@ impl<'a> Lexer<'a> {
         Self {
             source,
             cursor_index: 0,
-            diagnostics: DiagnosticReporter::new(),
         }
     }
 
-    pub fn next_token(&'a mut self) -> Vec<Token> {
+    pub fn identify_tokens(mut self) -> (Vec<Token>, DiagnosticReporter) {
         let mut tokens: Vec<Token> = Vec::new();
+        let mut diagnostics = DiagnosticReporter::new();
         while self.cursor_index <= self.source.len() {
-            tokens.push(self.identify_token());
-        }
-        tokens
-    }
-
-    pub fn get_diagnostics(&self) -> DiagnosticReporter {
-        self.diagnostics.clone()
-    }
-
-    fn identify_token(&mut self) -> Token {
-        if self.peek().is_some() {
+            if self.peek().is_none() {
+                self.advance();
+                tokens.push(Token::new(
+                    Ty::Eof,
+                    Span::new(self.cursor_index - 1, self.cursor_index - 1),
+                ));
+                continue;
+            };
             while self.peek().unwrap().is_whitespace() {
                 self.advance();
             }
             let ch = self.peek().unwrap();
-            let pindex = self.cursor_index;
-            if ch.is_alphabetic() || ch == '_' {
-                let mut word = String::new();
-                let start = self.cursor_index;
-                word.push(ch);
-                while self
-                    .peek_front()
-                    .is_some_and(|x| x.is_alphanumeric() || x == '_')
-                {
-                    self.advance();
-                    word.push(self.peek().unwrap());
+            let start = self.cursor_index;
+            self.advance();
+            let token: Ty = match ch {
+                '\n' => Ty::Eol,
+                '(' => Ty::LParen,
+                ')' => Ty::RParen,
+                '{' => Ty::LCurly,
+                '}' => Ty::RCurly,
+                '[' => Ty::LBoxed,
+                ']' => Ty::RBoxed,
+                '<' => {
+                    let ty: Ty;
+                    if self.peek().is_some_and(|x| x == '=') {
+                        self.advance();
+                        ty = Ty::LessThanEqual;
+                    } else {
+                        ty = Ty::LessThan;
+                    }
+                    ty
                 }
-                let end = self.cursor_index;
-                self.advance();
-                return Token::new(
-                    match word.as_str() {
+                '>' => {
+                    let ty: Ty;
+                    if self.peek().is_some_and(|x| x == '=') {
+                        self.advance();
+                        ty = Ty::GreaterThanEqual;
+                    } else {
+                        ty = Ty::GreaterThan;
+                    }
+                    ty
+                }
+                '!' => {
+                    let ty: Ty;
+                    if self.peek().is_some_and(|x| x == '=') {
+                        self.advance();
+                        ty = Ty::NotEqual;
+                    } else {
+                        ty = Ty::Not;
+                    }
+                    ty
+                }
+                '=' => {
+                    let mut ty: Ty = Ty::Unknown('\0');
+                    if self.peek().is_some() {
+                        if self.peek() == Some('=') {
+                            self.advance();
+                            ty = Ty::EqualEqual;
+                        } else if self.peek() == Some('>') {
+                            self.advance();
+                            ty = Ty::RightFatArrow;
+                        } else {
+                            ty = Ty::Equal;
+                        }
+                    }
+                    ty
+                }
+                '+' => Ty::Plus,
+                '-' => Ty::Minus,
+                '*' => Ty::Asterisk,
+                '/' => Ty::Slash,
+                '_' | 'a'..='z' | 'A'..='Z' => {
+                    while self.peek().is_some_and(|x| x.is_alphanumeric() || x == '_') {
+                        self.advance();
+                    }
+                    match &self.source[start..self.cursor_index] {
                         "var" => Ty::KVariable,
                         "mut" => Ty::KMutable,
                         "const" => Ty::KConstant,
                         "struct" => Ty::KStruct,
                         "class" => Ty::KClass,
-                        _ => Ty::Identifier(word.to_string()),
-                    },
-                    Span::new(start, end),
-                );
-            } else if ch.is_numeric() {
-                let mut num = String::new();
-                let start = self.cursor_index;
-                num.push(ch);
-                while self
-                    .peek_front()
-                    .is_some_and(|x| x.is_numeric() || x == '.')
-                {
-                    self.advance();
-                    num.push(self.peek().unwrap());
-                }
-                let end = self.cursor_index;
-                let num_as_i64 = num.parse::<i64>().unwrap_or_else(|_| {
-                    panic!("Failed to parse '{}' as an i64", num);
-                });
-
-                self.advance();
-                return Token::new(Ty::Number(num_as_i64), Span::new(start, end));
-            }
-
-            match ch {
-                '\n' => {
-                    self.advance();
-                    Token::new(Ty::Eol, Span::new(pindex, pindex))
-                }
-                '(' => {
-                    self.advance();
-                    Token::new(Ty::LParen, Span::new(pindex, pindex))
-                }
-                ')' => {
-                    self.advance();
-                    Token::new(Ty::RParen, Span::new(pindex, pindex))
-                }
-                '{' => {
-                    self.advance();
-                    Token::new(Ty::LCurly, Span::new(pindex, pindex))
-                }
-                '}' => {
-                    self.advance();
-                    Token::new(Ty::RCurly, Span::new(pindex, pindex))
-                }
-                '[' => {
-                    self.advance();
-                    Token::new(Ty::LBoxed, Span::new(pindex, pindex))
-                }
-                ']' => {
-                    self.advance();
-                    Token::new(Ty::RBoxed, Span::new(pindex, pindex))
-                }
-                '<' => {
-                    if self.peek_front().is_some_and(|x| x == '=') {
-                        self.advance();
-                        self.advance();
-                        return Token::new(Ty::LessThanEqual, Span::new(pindex, pindex + 1));
+                        id => Ty::Identifier(id.to_string()),
                     }
-                    self.advance();
-                    Token::new(Ty::LessThan, Span::new(pindex, pindex))
                 }
-                '>' => {
-                    if self.peek_front().is_some_and(|x| x == '=') {
+                '.' | '0'..='9' => {
+                    while self.peek().is_some_and(|x| x.is_numeric() || x == '.') {
                         self.advance();
-                        self.advance();
-                        return Token::new(Ty::GreaterThanEqual, Span::new(pindex, pindex + 1));
                     }
-                    self.advance();
-                    Token::new(Ty::GreaterThan, Span::new(pindex, pindex))
-                }
-                '!' => {
-                    if self.peek_front().is_some_and(|x| x == '=') {
-                        self.advance();
-                        self.advance();
-                        return Token::new(Ty::NotEqual, Span::new(pindex, pindex + 1));
-                    }
-                    self.advance();
-                    Token::new(Ty::Not, Span::new(pindex, pindex))
-                }
-                '=' => {
-                    if self.peek_front().is_some() {
-                        if self.peek_front() == Some('=') {
-                            self.advance();
-                            self.advance();
-                            return Token::new(Ty::EqualEqual, Span::new(pindex, pindex + 1));
-                        } else if self.peek_front() == Some('>') {
-                            self.advance();
-                            self.advance();
-                            return Token::new(Ty::RightFatArrow, Span::new(pindex, pindex + 1));
-                        }
-                    }
-                    self.advance();
-                    Token::new(Ty::Equal, Span::new(pindex, pindex))
-                }
-                '+' => {
-                    self.advance();
-                    Token::new(Ty::Plus, Span::new(pindex, pindex))
-                }
-                '-' => {
-                    self.advance();
-                    Token::new(Ty::Minus, Span::new(pindex, pindex))
-                }
-                '*' => {
-                    self.advance();
-                    return Token::new(Ty::Asterisk, Span::new(pindex, pindex));
-                }
-                '/' => {
-                    self.advance();
-                    Token::new(Ty::Slash, Span::new(pindex, pindex))
+                    let num = &self.source[start..=self.cursor_index];
+                    let num_as_i64 = num.parse::<i64>().unwrap_or_else(|_| {
+                        panic!("Failed to parse '{}' as an i64", num);
+                    });
+                    Ty::Number(num_as_i64)
                 }
                 _ => {
-                    self.advance();
-                    Token::new(Ty::Unknown(ch), Span::new(pindex, pindex))
+                    diagnostics.add(Diagnostic::new(
+                        DiagnosticLevel::Error,
+                        format!("Unknown token used: '{}'", ch),
+                        Span::new(self.cursor_index - 1, self.cursor_index - 1),
+                    ));
+                    Ty::Unknown(ch)
                 }
-            }
-        } else {
-            self.advance();
-            Token::new(
-                Ty::Eof,
-                Span::new(self.cursor_index - 1, self.cursor_index - 1),
-            )
+            };
+            let end = self.cursor_index;
+            tokens.push(Token::new(token, Span::new(start, end)));
         }
+        (tokens, diagnostics)
     }
 
     fn peek(&self) -> Option<char> {
         if self.cursor_index < self.source.len() {
             return self.source.chars().nth(self.cursor_index);
-        };
-        None
-    }
-
-    fn peek_front(&self) -> Option<char> {
-        if (self.cursor_index + 1) < self.source.len() {
-            return self.source.chars().nth(self.cursor_index + 1);
         };
         None
     }
