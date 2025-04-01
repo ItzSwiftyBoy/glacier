@@ -1,22 +1,16 @@
-use crate::{diagnostic::DiagnosticReporter, lexer::Lexer};
+use crate::diagnostic::DiagnosticReporter;
 
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub struct Compiler<'a> {
-    source: &'a str,
+    pub source: &'a [u8],
+    pub reporter: DiagnosticReporter,
 }
 
 impl<'a> Compiler<'a> {
-    pub fn new(source: &'a str) -> Self {
-        Self { source }
-    }
-
-    pub fn compile(&'a self) {
-        let mut diagnostics = DiagnosticReporter::new();
-        let lexer = Lexer::new(self.source).identify_tokens();
-        let tokens = lexer.0;
-        for diagnostic in lexer.1 {
-            diagnostics.add(diagnostic);
+    pub fn new(source: &'a [u8]) -> Self {
+        Self {
+            source,
+            reporter: DiagnosticReporter::new(),
         }
-        diagnostics.report(self.source);
-        println!("{:#?}", tokens);
     }
 }

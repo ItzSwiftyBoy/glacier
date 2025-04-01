@@ -1,31 +1,36 @@
+use core::str;
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
-    diagnostic::{Diagnostic, DiagnosticLevel, DiagnosticReporter},
+    compiler::Compiler,
+    diagnostic::{Diagnostic, DiagnosticLevel},
     utils::{Span, Token, TokenType as Ty},
 };
 
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub struct Lexer<'a> {
-    source: &'a str,
-    cursor_index: usize,
+    index: usize,
+    source: &'a [u8],
+    compiler: Rc<RefCell<Compiler<'a>>>,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(source: &'a str) -> Self {
+    pub fn new(compiler: Rc<RefCell<Compiler<'a>>>) -> Self {
         Self {
-            source,
-            cursor_index: 0,
+            index: 0,
+            source: compiler.borrow().source,
+            compiler: compiler.clone(),
         }
     }
 
-    pub fn identify_tokens(mut self) -> (Vec<Token>, DiagnosticReporter) {
+    pub fn identify_tokens(mut self) -> Vec<Token> {
         let mut tokens: Vec<Token> = Vec::new();
-        let mut diagnostics = DiagnosticReporter::new();
-        while self.cursor_index <= self.source.len() {
+        while self.index <= self.source.len() {
             if self.peek().is_none() {
                 self.advance();
                 tokens.push(Token::new(
                     Ty::Eof,
-                    Span::new(self.cursor_index - 1, self.cursor_index - 1),
+                    Span::new(self.index - 1, self.index - 1),
                 ));
                 continue;
             };
@@ -33,7 +38,7 @@ impl<'a> Lexer<'a> {
                 self.advance();
             }
             let ch = self.peek().unwrap();
-            let start = self.cursor_index;
+            let start = self.index;
             self.advance();
             let token: Ty = match ch {
                 '\n' => Ty::Eol,
@@ -44,46 +49,40 @@ impl<'a> Lexer<'a> {
                 '[' => Ty::LBoxed,
                 ']' => Ty::RBoxed,
                 '<' => {
-                    let ty: Ty;
                     if self.peek().is_some_and(|x| x == '=') {
                         self.advance();
-                        ty = Ty::LessThanEqual;
+                        Ty::LTEq
                     } else {
-                        ty = Ty::LessThan;
+                        Ty::LT
                     }
-                    ty
                 }
                 '>' => {
-                    let ty: Ty;
                     if self.peek().is_some_and(|x| x == '=') {
                         self.advance();
-                        ty = Ty::GreaterThanEqual;
+                        Ty::GTEq
                     } else {
-                        ty = Ty::GreaterThan;
+                        Ty::GT
                     }
-                    ty
                 }
                 '!' => {
-                    let ty: Ty;
                     if self.peek().is_some_and(|x| x == '=') {
                         self.advance();
-                        ty = Ty::NotEqual;
+                        Ty::NotEq
                     } else {
-                        ty = Ty::Not;
+                        Ty::Not
                     }
-                    ty
                 }
                 '=' => {
-                    let mut ty: Ty = Ty::Unknown('\0');
+                    let mut ty: Ty = Ty::Unknown(ch);
                     if self.peek().is_some() {
                         if self.peek() == Some('=') {
                             self.advance();
-                            ty = Ty::EqualEqual;
+                            ty = Ty::DoubleEq;
                         } else if self.peek() == Some('>') {
                             self.advance();
                             ty = Ty::RightFatArrow;
                         } else {
-                            ty = Ty::Equal;
+                            ty = Ty::Eq;
                         }
                     }
                     ty
@@ -96,7 +95,7 @@ impl<'a> Lexer<'a> {
                     while self.peek().is_some_and(|x| x.is_alphanumeric() || x == '_') {
                         self.advance();
                     }
-                    match &self.source[start..self.cursor_index] {
+                    match str::from_utf8(&self.source[start..self.index]).unwrap() {
                         "var" => Ty::KVariable,
                         "mut" => Ty::KMutable,
                         "const" => Ty::KConstant,
@@ -109,35 +108,42 @@ impl<'a> Lexer<'a> {
                     while self.peek().is_some_and(|x| x.is_numeric() || x == '.') {
                         self.advance();
                     }
-                    let num = &self.source[start..=self.cursor_index];
+                    let num = str::from_utf8(&self.source[start..self.index]).unwrap();
                     let num_as_i64 = num.parse::<i64>().unwrap_or_else(|_| {
                         panic!("Failed to parse '{}' as an i64", num);
                     });
                     Ty::Number(num_as_i64)
                 }
                 _ => {
-                    diagnostics.add(Diagnostic::new(
-                        DiagnosticLevel::Error,
+                    self.error(
                         format!("Unknown token used: '{}'", ch),
-                        Span::new(self.cursor_index - 1, self.cursor_index - 1),
-                    ));
+                        Span::new(self.index - 1, self.index - 1),
+                    );
                     Ty::Unknown(ch)
                 }
             };
-            let end = self.cursor_index;
+            let end = self.index - 1;
             tokens.push(Token::new(token, Span::new(start, end)));
         }
-        (tokens, diagnostics)
+        tokens
     }
 
     fn peek(&self) -> Option<char> {
-        if self.cursor_index < self.source.len() {
-            return self.source.chars().nth(self.cursor_index);
+        if self.index < self.source.len() {
+            return str::from_utf8(self.source).unwrap().chars().nth(self.index);
         };
         None
     }
 
     fn advance(&mut self) {
-        self.cursor_index += 1;
+        self.index += 1;
+    }
+
+    fn error(&mut self, message: String, span: Span) {
+        self.compiler.borrow_mut().reporter.add(Diagnostic::new(
+            DiagnosticLevel::Error,
+            message,
+            span,
+        ));
     }
 }

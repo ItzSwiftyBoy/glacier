@@ -18,14 +18,14 @@ pub enum TokenType {
     RCurly,
     LBoxed,
     RBoxed,
-    LessThan,
-    GreaterThan,
-    Equal,
-    EqualEqual,
+    LT,
+    GT,
+    Eq,
+    DoubleEq,
     Not,
-    NotEqual,
-    LessThanEqual,
-    GreaterThanEqual,
+    NotEq,
+    LTEq,
+    GTEq,
     RightFatArrow,
     Plus,
     Minus,
@@ -38,7 +38,7 @@ pub enum TokenType {
     KStruct,
     KClass,
 
-    Number(i64), // TODO: Have 'Integer(i64)' & 'Float(f64)' instead of 'Number(i64)'
+    Number(i64), // TODO: Have full `Literal` implementation.
 
     Identifier(String),
 

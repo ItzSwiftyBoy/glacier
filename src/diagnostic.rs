@@ -65,7 +65,7 @@ impl DiagnosticReporter {
                     eprint!(
                         "{}: {}",
                         "Error".red().bold(),
-                        format!("{}", diagnostic.message).bright_white().bold()
+                        diagnostic.message.to_string().bright_white().bold()
                     )
                 }
                 DiagnosticLevel::Warning => eprintln!("Warning: {}", diagnostic.message),
