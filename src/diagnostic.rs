@@ -3,13 +3,13 @@ use std::ops::Index;
 use crate::utils::Span;
 use colored::Colorize;
 
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone)]
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum DiagnosticLevel {
     Error,
     Warning,
 }
 
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone)]
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub struct Diagnostic {
     pub level: DiagnosticLevel,
     pub message: String,
@@ -24,8 +24,8 @@ impl Diagnostic {
             level,
             message,
             span,
-            note: vec![],
-            hint: vec![],
+            note: Vec::new(),
+            hint: Vec::new(),
         }
     }
 
@@ -40,7 +40,7 @@ impl Diagnostic {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone)]
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub struct DiagnosticReporter {
     diagnostics: Vec<Diagnostic>,
     curr: usize,

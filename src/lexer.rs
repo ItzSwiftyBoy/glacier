@@ -4,10 +4,10 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     compiler::Compiler,
     diagnostic::{Diagnostic, DiagnosticLevel},
-    utils::{Span, Token, TokenType as Ty},
+    utils::{LiteralKind, Span, Token, TokenType as Ty},
 };
 
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, PartialOrd)]
 pub struct Lexer<'a> {
     index: usize,
     source: &'a [u8],
@@ -23,16 +23,11 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn identify_tokens(mut self) -> Vec<Token> {
+    pub fn identify_tokens(&mut self) -> Vec<Token> {
         let mut tokens: Vec<Token> = Vec::new();
-        while self.index <= self.source.len() {
+        loop {
             if self.peek().is_none() {
-                self.advance();
-                tokens.push(Token::new(
-                    Ty::Eof,
-                    Span::new(self.index - 1, self.index - 1),
-                ));
-                continue;
+                break;
             };
             while self.peek().unwrap().is_whitespace() {
                 self.advance();
@@ -41,7 +36,7 @@ impl<'a> Lexer<'a> {
             let start = self.index;
             self.advance();
             let token: Ty = match ch {
-                '\n' => Ty::Eol,
+                ';' => Ty::Semicolon,
                 '(' => Ty::LParen,
                 ')' => Ty::RParen,
                 '{' => Ty::LCurly,
@@ -73,7 +68,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 '=' => {
-                    let mut ty: Ty = Ty::Unknown(ch);
+                    let mut ty: Ty = Ty::Unknown;
                     if self.peek().is_some() {
                         if self.peek() == Some('=') {
                             self.advance();
@@ -91,46 +86,113 @@ impl<'a> Lexer<'a> {
                 '-' => Ty::Minus,
                 '*' => Ty::Asterisk,
                 '/' => Ty::Slash,
-                '_' | 'a'..='z' | 'A'..='Z' => {
-                    while self.peek().is_some_and(|x| x.is_alphanumeric() || x == '_') {
+                ':' => Ty::Colon,
+                '\'' => {
+                    if self.peek().is_some_and(|x| x != '\\') {
+                        let c = self.peek().unwrap();
                         self.advance();
-                    }
-                    match str::from_utf8(&self.source[start..self.index]).unwrap() {
-                        "var" => Ty::KVariable,
-                        "mut" => Ty::KMutable,
-                        "const" => Ty::KConstant,
-                        "struct" => Ty::KStruct,
-                        "class" => Ty::KClass,
-                        id => Ty::Identifier(id.to_string()),
+                        if self.peek().is_some_and(|x| x != '\'') {
+                            self.error(
+                                "Expected the end of char quote.".to_string(),
+                                Span {
+                                    start: self.index,
+                                    end: self.index,
+                                },
+                            );
+                        }
+                        self.advance();
+                        Ty::Literal(LiteralKind::Char(c))
+                    } else {
+                        Ty::Unknown
                     }
                 }
-                '.' | '0'..='9' => {
-                    while self.peek().is_some_and(|x| x.is_numeric() || x == '.') {
-                        self.advance();
-                    }
-                    let num = str::from_utf8(&self.source[start..self.index]).unwrap();
-                    let num_as_i64 = num.parse::<i64>().unwrap_or_else(|_| {
-                        panic!("Failed to parse '{}' as an i64", num);
-                    });
-                    Ty::Number(num_as_i64)
+                '"' => {
+                    todo!()
                 }
+                '_' | 'a'..='z' | 'A'..='Z' => self.identify_keyword_or_id(start),
+                '0'..='9' => self.identify_number(start),
                 _ => {
                     self.error(
                         format!("Unknown token used: '{}'", ch),
-                        Span::new(self.index - 1, self.index - 1),
+                        Span {
+                            start: self.index - 1,
+                            end: self.index - 1,
+                        },
                     );
-                    Ty::Unknown(ch)
+                    Ty::Unknown
                 }
             };
             let end = self.index - 1;
-            tokens.push(Token::new(token, Span::new(start, end)));
+            tokens.push(Token::new(token, Span { start, end }));
         }
         tokens
+    }
+
+    fn identify_keyword_or_id(&mut self, start: usize) -> Ty {
+        while self.peek().is_some_and(|x| x.is_alphanumeric() || x == '_') {
+            self.advance();
+        }
+        match str::from_utf8(&self.source[start..self.index]).unwrap() {
+            "isize" => Ty::KISIZE,
+            "i64" => Ty::KI64,
+            "i32" => Ty::KI32,
+            "i16" => Ty::KI16,
+            "i8" => Ty::KI8,
+            "var" => Ty::KVariable,
+            "mut" => Ty::KMutable,
+            "const" => Ty::KConstant,
+            "func" => Ty::KFunction,
+            "struct" => Ty::KStruct,
+            "class" => Ty::KClass,
+            id => Ty::Identifier(id.to_string()),
+        }
+    }
+
+    fn identify_number(&mut self, start: usize) -> Ty {
+        let mut has_point = false;
+        while self.peek().is_some_and(|x| x.is_numeric() || x == '.') {
+            if self.peek() != Some('.') {
+                self.advance();
+                continue;
+            }
+            if self.peek_front(0) == Some('.') && !has_point {
+                return Ty::Literal(LiteralKind::Integer(
+                    String::from_utf8_lossy(&self.source[start..self.index]).to_string(),
+                ));
+            } else if !has_point {
+                has_point = true;
+            } else if has_point {
+                self.error(
+                    "Can't parse number properly.".to_string(),
+                    Span {
+                        start,
+                        end: self.index,
+                    },
+                );
+            }
+            self.advance();
+        }
+        let num = String::from_utf8_lossy(&self.source[start..self.index]).to_string();
+        if has_point {
+            Ty::Literal(LiteralKind::Float(num))
+        } else {
+            Ty::Literal(LiteralKind::Integer(num))
+        }
     }
 
     fn peek(&self) -> Option<char> {
         if self.index < self.source.len() {
             return str::from_utf8(self.source).unwrap().chars().nth(self.index);
+        };
+        None
+    }
+
+    fn peek_front(&self, offset: usize) -> Option<char> {
+        if self.index < self.source.len() {
+            return str::from_utf8(self.source)
+                .unwrap()
+                .chars()
+                .nth(self.index + offset + 1);
         };
         None
     }

@@ -1,6 +1,6 @@
 use crate::diagnostic::DiagnosticReporter;
 
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, PartialOrd)]
 pub struct Compiler<'a> {
     pub source: &'a [u8],
     pub reporter: DiagnosticReporter,

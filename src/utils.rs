@@ -1,16 +1,10 @@
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Clone)]
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Copy, Clone)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
 }
 
-impl Span {
-    pub fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum TokenType {
     LParen,
     RParen,
@@ -18,6 +12,8 @@ pub enum TokenType {
     RCurly,
     LBoxed,
     RBoxed,
+    Dot,
+    DoubleDot,
     LT,
     GT,
     Eq,
@@ -31,31 +27,43 @@ pub enum TokenType {
     Minus,
     Asterisk,
     Slash,
+    Colon,
 
+    KISIZE,
+    KI64,
+    KI32,
+    KI16,
+    KI8,
     KVariable,
     KMutable,
     KConstant,
+    KFunction,
     KStruct,
     KClass,
 
-    Number(i64), // TODO: Have full `Literal` implementation.
+    Literal(LiteralKind), // TODO: Have full `Literal` implementation.
 
     Identifier(String),
 
-    Unknown(char),
+    Unknown,
 
-    Eol,
-    Eof,
+    Semicolon,
+    // Eof,
 }
 
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
-pub struct Token {
-    pub ty: TokenType,
-    pub span: Span,
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
+pub enum LiteralKind {
+    Integer(String),
+    Float(String),
+    Char(char),
+    String(String),
 }
+
+#[derive(Debug, PartialEq, PartialOrd, Clone)]
+pub struct Token(pub TokenType, pub Span);
 
 impl Token {
     pub fn new(ty: TokenType, span: Span) -> Self {
-        Self { ty, span }
+        Self(ty, span)
     }
 }
