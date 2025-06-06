@@ -1,9 +1,8 @@
 use core::str;
-use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     compiler::Compiler,
-    diagnostic::{Diagnostic, DiagnosticLevel},
+    diagnostic::{Diagnostic, DiagnosticLevel, DiagnosticReporter},
     utils::{LiteralKind, Span, Token, TokenType as Ty},
 };
 
@@ -11,31 +10,30 @@ use crate::{
 pub struct Lexer<'a> {
     index: usize,
     source: &'a [u8],
-    compiler: Rc<RefCell<Compiler<'a>>>,
+    reporter: DiagnosticReporter,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(compiler: Rc<RefCell<Compiler<'a>>>) -> Self {
+    pub fn new(compiler: &'a Compiler) -> Self {
         Self {
             index: 0,
-            source: compiler.borrow().source,
-            compiler: compiler.clone(),
+            source: compiler.source,
+            reporter: DiagnosticReporter::new(),
         }
     }
 
     pub fn identify_tokens(&mut self) -> Vec<Token> {
-        let mut tokens: Vec<Token> = Vec::new();
-        loop {
-            if self.peek().is_none() {
-                break;
-            };
-            while self.peek().unwrap().is_whitespace() {
+        let mut tokens = Vec::new();
+
+        while let Some(ch) = self.peek() {
+            if ch.is_whitespace() {
                 self.advance();
+                continue;
             }
-            let ch = self.peek().unwrap();
+
             let start = self.index;
             self.advance();
-            let token: Ty = match ch {
+            let token = match ch {
                 ';' => Ty::Semicolon,
                 '(' => Ty::LParen,
                 ')' => Ty::RParen,
@@ -43,97 +41,114 @@ impl<'a> Lexer<'a> {
                 '}' => Ty::RCurly,
                 '[' => Ty::LBoxed,
                 ']' => Ty::RBoxed,
-                '<' => {
-                    if self.peek().is_some_and(|x| x == '=') {
+
+                '<' => match self.peek() {
+                    Some('=') => {
                         self.advance();
                         Ty::LTEq
-                    } else {
-                        Ty::LT
                     }
-                }
-                '>' => {
-                    if self.peek().is_some_and(|x| x == '=') {
+                    _ => Ty::LT,
+                },
+
+                '>' => match self.peek() {
+                    Some('=') => {
                         self.advance();
                         Ty::GTEq
-                    } else {
-                        Ty::GT
                     }
-                }
-                '!' => {
-                    if self.peek().is_some_and(|x| x == '=') {
+                    _ => Ty::GT,
+                },
+
+                '!' => match self.peek() {
+                    Some('=') => {
                         self.advance();
                         Ty::NotEq
-                    } else {
-                        Ty::Not
                     }
-                }
-                '=' => {
-                    let mut ty: Ty = Ty::Unknown;
-                    if self.peek().is_some() {
-                        if self.peek() == Some('=') {
-                            self.advance();
-                            ty = Ty::DoubleEq;
-                        } else if self.peek() == Some('>') {
-                            self.advance();
-                            ty = Ty::RightFatArrow;
-                        } else {
-                            ty = Ty::Eq;
-                        }
+                    _ => Ty::Not,
+                },
+
+                '=' => match self.peek() {
+                    Some('=') => {
+                        self.advance();
+                        Ty::DoubleEq
                     }
-                    ty
-                }
+                    Some('>') => {
+                        self.advance();
+                        Ty::RightFatArrow
+                    }
+                    _ => Ty::Eq,
+                },
+
                 '+' => Ty::Plus,
                 '-' => Ty::Minus,
                 '*' => Ty::Asterisk,
                 '/' => Ty::Slash,
                 ':' => Ty::Colon,
-                '\'' => {
-                    if self.peek().is_some_and(|x| x != '\\') {
-                        let c = self.peek().unwrap();
+
+                '\'' => match self.peek() {
+                    Some(c) if c != '\\' => {
                         self.advance();
-                        if self.peek().is_some_and(|x| x != '\'') {
-                            self.error(
-                                "Expected the end of char quote.".to_string(),
-                                Span {
-                                    start: self.index,
-                                    end: self.index,
-                                },
-                            );
+                        match self.peek() {
+                            Some('\'') => {
+                                self.advance();
+                                Ty::Literal(LiteralKind::Char(c))
+                            }
+                            _ => {
+                                self.error(
+                                    "Expected end of char quote.",
+                                    Span {
+                                        start,
+                                        end: self.index,
+                                    },
+                                );
+                                Ty::Unknown
+                            }
                         }
-                        self.advance();
-                        Ty::Literal(LiteralKind::Char(c))
-                    } else {
-                        Ty::Unknown
                     }
-                }
+                    _ => Ty::Unknown,
+                },
+
                 '"' => {
+                    // TODO: Implement string literal parsing
                     todo!()
                 }
+
                 '_' | 'a'..='z' | 'A'..='Z' => self.identify_keyword_or_id(start),
                 '0'..='9' => self.identify_number(start),
+
                 _ => {
-                    self.error(
-                        format!("Unknown token used: '{}'", ch),
-                        Span {
-                            start: self.index - 1,
-                            end: self.index - 1,
-                        },
-                    );
+                    self.error("Unknown token used: '{ch}'", Span { start, end: start });
                     Ty::Unknown
                 }
             };
-            let end = self.index - 1;
-            tokens.push(Token::new(token, Span { start, end }));
+
+            tokens.push(Token::new(
+                token,
+                Span {
+                    start,
+                    end: self.index - 1,
+                },
+            ));
+        }
+
+        if self.reporter.has_error() {
+            self.reporter
+                .report(str::from_utf8(&self.source).ok().unwrap());
         }
         tokens
     }
 
     fn identify_keyword_or_id(&mut self, start: usize) -> Ty {
-        while self.peek().is_some_and(|x| x.is_alphanumeric() || x == '_') {
-            self.advance();
+        while let Some(c) = self.peek() {
+            if c.is_alphanumeric() || c == '_' {
+                self.advance();
+            } else {
+                break;
+            }
         }
+
         match str::from_utf8(&self.source[start..self.index]).unwrap() {
             "isize" => Ty::KISIZE,
+            "i128" => Ty::KI128,
             "i64" => Ty::KI64,
             "i32" => Ty::KI32,
             "i16" => Ty::KI16,
@@ -149,62 +164,55 @@ impl<'a> Lexer<'a> {
     }
 
     fn identify_number(&mut self, start: usize) -> Ty {
-        let mut has_point = false;
-        while self.peek().is_some_and(|x| x.is_numeric() || x == '.') {
-            if self.peek() != Some('.') {
-                self.advance();
-                continue;
+        let mut has_dot = false;
+
+        while let Some(ch) = self.peek() {
+            match ch {
+                '0'..='9' => self.advance(),
+                '.' if !has_dot => {
+                    if self.peek_front(0) == Some('.') {
+                        break;
+                    }
+                    has_dot = true;
+                    self.advance();
+                }
+                _ => break,
             }
-            if self.peek_front(0) == Some('.') && !has_point {
-                return Ty::Literal(LiteralKind::Integer(
-                    String::from_utf8_lossy(&self.source[start..self.index]).to_string(),
-                ));
-            } else if !has_point {
-                has_point = true;
-            } else if has_point {
-                self.error(
-                    "Can't parse number properly.".to_string(),
-                    Span {
-                        start,
-                        end: self.index,
-                    },
-                );
-            }
-            self.advance();
         }
+
         let num = String::from_utf8_lossy(&self.source[start..self.index]).to_string();
-        if has_point {
+
+        if has_dot {
+            let num: f64 = num.parse().ok().unwrap_or_default();
             Ty::Literal(LiteralKind::Float(num))
         } else {
+            let num: i64 = num.parse().ok().unwrap_or_default();
             Ty::Literal(LiteralKind::Integer(num))
         }
     }
 
     fn peek(&self) -> Option<char> {
-        if self.index < self.source.len() {
-            return str::from_utf8(self.source).unwrap().chars().nth(self.index);
-        };
-        None
+        str::from_utf8(&self.source[self.index..])
+            .ok()
+            .and_then(|s| s.chars().next())
     }
 
     fn peek_front(&self, offset: usize) -> Option<char> {
-        if self.index < self.source.len() {
-            return str::from_utf8(self.source)
-                .unwrap()
-                .chars()
-                .nth(self.index + offset + 1);
-        };
-        None
+        str::from_utf8(&self.source[self.index..])
+            .ok()
+            .and_then(|s| s.chars().nth(offset + 1))
     }
 
     fn advance(&mut self) {
-        self.index += 1;
+        if let Some(ch) = self.peek() {
+            self.index += ch.len_utf8();
+        }
     }
 
-    fn error(&mut self, message: String, span: Span) {
-        self.compiler.borrow_mut().reporter.add(Diagnostic::new(
+    fn error(&mut self, message: impl Into<String>, span: Span) {
+        self.reporter.add(Diagnostic::new(
             DiagnosticLevel::Error,
-            message,
+            message.into(),
             span,
         ));
     }

@@ -1,6 +1,4 @@
 func main() {
 	var x = ((4 + 2 * 5) / 7) + 4
 	var y = x + 10
-
-	println("![]", y)
 }

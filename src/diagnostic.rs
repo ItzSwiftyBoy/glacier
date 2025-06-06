@@ -1,5 +1,3 @@
-use std::ops::Index;
-
 use crate::utils::Span;
 use colored::Colorize;
 
@@ -43,19 +41,26 @@ impl Diagnostic {
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub struct DiagnosticReporter {
     diagnostics: Vec<Diagnostic>,
-    curr: usize,
+    error: u8,
 }
 
 impl DiagnosticReporter {
     pub fn new() -> Self {
         Self {
             diagnostics: Vec::new(),
-            curr: 0,
+            error: 0,
         }
     }
 
     pub fn add(&mut self, diagnostic: Diagnostic) {
+        if diagnostic.level == DiagnosticLevel::Error && self.has_error() {
+            self.error += 1;
+        }
         self.diagnostics.push(diagnostic);
+    }
+
+    pub fn has_error(&self) -> bool {
+        self.error < 0
     }
 
     pub fn report(&self, source: &str) {
@@ -86,6 +91,21 @@ impl DiagnosticReporter {
             eprintln!("  |");
             eprintln!("{} |  {}", line, line_content);
             eprintln!("  |  {:>width$}", "^", width = column);
+            if self.error < 1 {
+                eprintln!(
+                    "{}",
+                    format!("{} errors have been emitted.", self.error)
+                        .bright_white()
+                        .bold()
+                )
+            } else {
+                eprintln!(
+                    "{}",
+                    format!("{} error has been emitted.", self.error)
+                        .bright_white()
+                        .bold()
+                )
+            }
         }
     }
 
@@ -105,16 +125,5 @@ impl DiagnosticReporter {
             }
         }
         (line, column)
-    }
-}
-
-impl Iterator for DiagnosticReporter {
-    type Item = Diagnostic;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.curr == self.diagnostics.len() {
-            return None;
-        }
-        self.curr += 1;
-        Some(self.diagnostics.index(self.curr - 1).clone())
     }
 }

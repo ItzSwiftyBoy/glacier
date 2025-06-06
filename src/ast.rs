@@ -1,89 +1,96 @@
 #[derive(Debug)]
-pub struct AST {
-    statements: Vec<Statement>,
+pub struct AST<'a> {
+    elements: Vec<Element<'a>>,
 }
 
-impl AST {
+impl<'a> AST<'a> {
     pub fn new() -> Self {
         Self {
-            statements: Vec::new(),
+            elements: Vec::new(),
         }
     }
-    pub fn add_stmt(&mut self, stmt: Statement) {
-        self.statements.push(stmt);
+
+    pub fn add_function(&mut self, name: String, param: Vec<Parameter>, body: Vec<Statement<'a>>) {
+        self.add_element(Element::FuncScope { name, param, body });
+    }
+
+    pub fn add_const_element(&mut self, name: &'a String, ty: Type, expr: Expr) {
+        self.add_element(Element::Constant { name, ty, expr });
+    }
+
+    pub fn add_element(&mut self, stmt: Element<'a>) {
+        self.elements.push(stmt);
     }
 }
 
 #[derive(Debug)]
-pub enum Statement {
-    Expression(Expr),
-    VarDecl {
+pub enum Element<'a> {
+    FuncScope {
         name: String,
-        is_mutable: bool,
-        ty: Type,
-        expr: Vec<Expr>,
+        param: Vec<Parameter>,
+        body: Vec<Statement<'a>>,
     },
-    Scope {
-        name: String,
-        ty: ScopeType,
+    Constant {
+        name: &'a String,
+        ty: Type,
+        expr: Expr,
     },
     Unknown,
+}
+
+#[derive(Debug)]
+pub enum Statement<'a> {
+    VarDecl {
+        name: &'a String,
+        ty: Type,
+        expr: Option<Expr>,
+    },
 }
 
 #[derive(Debug)]
 pub enum Expr {
-    Number {
-        is_float: bool,
-        num: String,
-    },
-    BinaryOp {
+    Integer(i64),
+    Float(f64),
+    Expression {
         op: BinOp,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
-    Variable(String),
-    Unknown,
-}
-
-#[derive(Debug)]
-pub enum Type {
-    Int { is_signed: bool, size: Size },
-    Float { is_signed: bool, size: Size },
-    Char,
-    Bool,
-    Unknown,
+    Var(String),
 }
 
 #[derive(Debug)]
 pub enum BinOp {
     Add,
     Subtract,
-    Multiply,
+    Multiplicate,
     Divide,
-    Unknown,
 }
 
 #[derive(Debug)]
+pub enum Type {
+    Int8 { is_unsigned: bool },
+    Int16 { is_unsigned: bool },
+    Int32 { is_unsigned: bool },
+    Int64 { is_unsigned: bool },
+    Int128 { is_unsigned: bool },
+    Float32,
+    Float64,
+    Unknown,
+}
+
+/* #[derive(Debug)]
 pub enum Size {
-    Long = 64,
-    Normal = 32,
+    TooShort = 8,
     Short = 16,
-    ShortShort = 8,
-}
-
-#[derive(Debug)]
-pub enum ScopeType {
-    Function {
-        parameter: Vec<Parameter>,
-        body: Vec<Statement>,
-    },
-    Class,
-    Struct,
-    Unknown,
-}
+    Normal = 32,
+    Long = 64,
+    TooLong = 128,
+    TooMuchLong = 256,
+} */
 
 #[derive(Debug)]
 pub struct Parameter {
-    pub name: String,
-    pub ty: Type,
+    name: String,
+    ty: Type,
 }
