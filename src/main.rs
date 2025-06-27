@@ -34,13 +34,11 @@ fn main() {
         return;
     };
 
-    let compiler = Compiler::new(source.as_bytes());
-    let tokens = Lexer::new(&compiler).identify_tokens();
-    let mut parser = Parser::new(&compiler, &tokens);
-    let ast = match parser.parse() {
-        Some(ast) => ast,
-        None => return,
-    };
-    // println!("{:#?}", tokens);
+    let compiler = Compiler::new(&source);
+    let lexer = Lexer::new(compiler.source);
+    let tokens = lexer.identify_tokens();
+    println!("{:#?}", tokens);
+    let mut parser = Parser::new(&compiler, tokens);
+    let ast = parser.parse();
     println!("{:#?}", ast);
 }

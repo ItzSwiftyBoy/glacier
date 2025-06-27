@@ -1,10 +1,16 @@
-#[derive(Debug, Default, Eq, PartialEq, PartialOrd, Ord, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
 }
 
-#[derive(Debug, Default, PartialEq, PartialOrd, Clone)]
+impl Span {
+    pub fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TokenType {
     LParen,
     RParen,
@@ -46,22 +52,21 @@ pub enum TokenType {
 
     Identifier(String),
 
-    #[default]
     Unknown,
 
     Semicolon,
-    // Eof,
+    Eof,
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum LiteralKind {
-    Integer(i64),
-    Float(f64),
+    Integer(String),
+    Float(String),
     Char(char),
     String(String),
 }
 
-#[derive(Debug, Default, PartialEq, PartialOrd, Clone)]
+#[derive(Debug, Clone)]
 pub struct Token {
     pub ty: TokenType,
     pub span: Span,
@@ -71,35 +76,4 @@ impl Token {
     pub fn new(ty: TokenType, span: Span) -> Self {
         Self { ty, span }
     }
-}
-
-#[derive(Debug)]
-pub struct Symbol {
-    name: String,
-    ty: ElementType,
-    locals: LocalSymbol,
-}
-
-#[derive(Debug)]
-pub enum ElementType {
-    Const,
-    Func,
-}
-
-#[derive(Debug)]
-pub struct LocalSymbol {
-    name: String,
-    ty: SizeType,
-}
-
-#[derive(Debug)]
-pub enum SizeType {
-    Int8 { is_unsigned: bool },
-    Int16 { is_unsigned: bool },
-    Int32 { is_unsigned: bool },
-    Int64 { is_unsigned: bool },
-    Int128 { is_unsigned: bool },
-    Float32,
-    Float64,
-    Unknown,
 }

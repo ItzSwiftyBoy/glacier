@@ -2,14 +2,14 @@ use crate::utils::Span;
 use colored::Colorize;
 
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
-pub enum DiagnosticLevel {
+pub enum DiagnosticKind {
     Error,
     Warning,
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Clone)]
+#[derive(Debug, Clone)]
 pub struct Diagnostic {
-    pub level: DiagnosticLevel,
+    pub kind: DiagnosticKind,
     pub message: String,
     pub span: Span,
     pub note: Vec<String>,
@@ -17,9 +17,9 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn new(level: DiagnosticLevel, message: String, span: Span) -> Self {
+    pub fn new(level: DiagnosticKind, message: String, span: Span) -> Self {
         Self {
-            level,
+            kind: level,
             message,
             span,
             note: Vec::new(),
@@ -38,7 +38,7 @@ impl Diagnostic {
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Clone)]
+#[derive(Debug, Clone)]
 pub struct DiagnosticReporter {
     diagnostics: Vec<Diagnostic>,
     error: u8,
@@ -53,27 +53,27 @@ impl DiagnosticReporter {
     }
 
     pub fn add(&mut self, diagnostic: Diagnostic) {
-        if diagnostic.level == DiagnosticLevel::Error && self.has_error() {
+        if diagnostic.kind == DiagnosticKind::Error && self.has_error() {
             self.error += 1;
         }
         self.diagnostics.push(diagnostic);
     }
 
     pub fn has_error(&self) -> bool {
-        self.error < 0
+        self.error != 0
     }
 
     pub fn report(&self, source: &str) {
         for diagnostic in &self.diagnostics {
-            match diagnostic.level {
-                DiagnosticLevel::Error => {
+            match diagnostic.kind {
+                DiagnosticKind::Error => {
                     eprint!(
                         "{}: {}",
                         "Error".red().bold(),
                         diagnostic.message.to_string().bright_white().bold()
                     )
                 }
-                DiagnosticLevel::Warning => eprintln!("Warning: {}", diagnostic.message),
+                DiagnosticKind::Warning => eprintln!("Warning: {}", diagnostic.message),
             }
 
             let span = &diagnostic.span;

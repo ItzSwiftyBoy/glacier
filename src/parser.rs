@@ -1,19 +1,20 @@
 use core::str;
 
-use crate::ast::{Element, Expr, Parameter, Type};
+use crate::ast::{Element, Expr, Parameter, Statement};
 use crate::compiler::Compiler;
-use crate::diagnostic::{Diagnostic, DiagnosticLevel, DiagnosticReporter};
+use crate::diagnostic::{Diagnostic, DiagnosticKind, DiagnosticReporter};
 use crate::utils::{LiteralKind, Span, TokenType as Ty};
 use crate::{ast::AST, utils::Token};
 
 pub struct Parser<'a> {
     current: usize,
-    source: &'a [u8],
+    source: &'a str,
     reporter: DiagnosticReporter,
-    tokens: &'a Vec<Token>,
+    tokens: Vec<Token>,
 }
+
 impl<'a> Parser<'a> {
-    pub fn new(compiler: &'a Compiler<'a>, tokens: &'a Vec<Token>) -> Self {
+    pub fn new(compiler: &'a Compiler<'a>, tokens: Vec<Token>) -> Self {
         Self {
             current: 0,
             source: compiler.source,
@@ -22,20 +23,63 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(&mut self) -> Option<AST> {
+    pub fn parse(&mut self) -> AST {
         let mut ast = AST::new();
-        while !self.is_at_end() {}
-        if self.reporter.has_error() {
-            self.reporter
-                .report(str::from_utf8(&self.source).ok().unwrap());
-            return None;
+        while !self.is_at_end() {
+            let ty = self.current().unwrap().ty.clone();
+            if let Some(e) = self.parse_element(ty) {
+                ast.add_element(e);
+            }
+
+            if self.current().is_none() {
+                break;
+            }
         }
-        Some(ast)
+
+        if self.reporter.has_error() {
+            self.reporter.report(self.source);
+        }
+
+        ast
     }
 
-    fn parse_element(&mut self) -> Element {}
+    fn parse_element(&mut self, ty: Ty) -> Option<Element> {
+        match ty {
+            Ty::KFunction => self.parse_function(),
+            _ => {
+                self.error("Unexpected token found.");
+                Element::Unknown
+            }
+        };
+        None
+    }
 
-    fn parse_stmt(&mut self) -> Option<Statement> {
+    fn parse_function(&mut self) -> Element {
+        let mut name = String::new();
+        let mut param: Vec<Parameter> = Vec::new();
+        let mut body: Vec<Statement> = Vec::new();
+
+        self.advance();
+        if let Some(t) = self.current() {
+            if let Ty::Identifier(n) = &t.ty {
+                name = n.to_string();
+            }
+        } else {
+            self.error("Expected an Identifier.");
+        }
+
+        self.advance();
+        if let Some(t) = self.current() {
+            if t.ty == Ty::LParen {
+                self.advance();
+            } else {
+                self.error("Expected Left Parentheses.");
+            }
+        }
+        Element::FuncScope { name, param, body }
+    }
+
+    fn parse_stmt(&mut self) -> Option<Element> {
         None
     }
 
@@ -43,11 +87,11 @@ impl<'a> Parser<'a> {
         None
     }
 
-    fn peek(&self, offset: usize) -> &Token {
-        self.tokens.get(self.current + offset).unwrap()
+    fn peek(&self, offset: usize) -> Option<&Token> {
+        self.tokens.get(self.current + offset)
     }
 
-    fn current(&self) -> &Token {
+    fn current(&self) -> Option<&Token> {
         self.peek(0)
     }
 
@@ -62,9 +106,9 @@ impl<'a> Parser<'a> {
 
     fn error(&mut self, message: impl Into<String>) {
         self.reporter.add(Diagnostic::new(
-            DiagnosticLevel::Error,
+            DiagnosticKind::Error,
             message.into(),
-            self.current().span,
+            self.current().unwrap().span,
         ));
     }
 
