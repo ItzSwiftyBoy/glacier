@@ -1,4 +1,5 @@
 func main() {
-	var x = ((4 + 2 * 5) / 7) + 4
-	var y = x + 10
+  var a = 2 * 3 + 5 / 5 - (13 - 20 / 4);
+  var b = 2;
+  return a;
 }

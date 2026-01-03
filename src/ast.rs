@@ -1,13 +1,15 @@
+#![allow(dead_code)]
+
+use crate::utils::Token;
+
 #[derive(Debug)]
-pub struct AST {
-    elements: Vec<Element>,
+pub struct Ast {
+    items: Vec<Item>,
 }
 
-impl AST {
+impl Ast {
     pub fn new() -> Self {
-        Self {
-            elements: Vec::new(),
-        }
+        Self { items: Vec::new() }
     }
 
     // pub fn add_function(&mut self, name: String, param: Vec<Parameter>, body: Vec<Statement>) {
@@ -18,57 +20,112 @@ impl AST {
     //     self.add_element(Element::Constant { name, ty, expr });
     // }
 
-    pub fn add_element(&mut self, element: Element) {
-        self.elements.push(element);
+    pub fn add_item(&mut self, item: Item) {
+        self.items.push(item);
     }
 }
 
 #[derive(Debug)]
-pub enum Element {
-    FuncScope {
-        name: String,
-        param: Vec<Parameter>,
-        body: Vec<Statement>,
-    },
-    Constant {
-        name: String,
-        ty: String,
-        expr: Expr,
-    },
+pub enum Item {
+    Func(Function),
     Unknown,
+}
+#[derive(Debug)]
+pub struct Function {
+    pub name: Token,
+    pub params: Vec<Parameter>,
+    pub return_ty: Option<Token>,
+    pub body: Block,
+}
+
+#[derive(Debug)]
+pub struct Block {
+    statements: Vec<Statement>,
+    expressions: Vec<Expr>,
+}
+
+impl Block {
+    pub fn new() -> Self {
+        Self {
+            statements: Vec::new(),
+            expressions: Vec::new(),
+        }
+    }
+
+    pub fn push_stmt(&mut self, stmt: Statement) {
+        self.statements.push(stmt);
+    }
+
+    pub fn push_expr(&mut self, expr: Expr) {
+        self.expressions.push(expr);
+    }
 }
 
 #[derive(Debug)]
 pub enum Statement {
-    VarDecl {
-        name: String,
-        ty: String,
+    Var {
+        name: Token,
+        ty: Option<Token>,
         expr: Option<Expr>,
     },
+    Unknown,
 }
+/* Constant {
+    name: String,
+    ty: String,
+    expr: Expr,
+},
+VarDecl {
+    name: String,
+    ty: Option<Token>,
+    expr: Option<Expr>,
+},
+Unknown */
 
 #[derive(Debug)]
 pub enum Expr {
-    Integer(i64),
-    Float(f64),
-    Expression {
-        op: BinOp,
+    Binary {
         lhs: Box<Expr>,
+        op: BinOp,
         rhs: Box<Expr>,
     },
-    Var(String),
+    Unary {
+        op: UnaryOp,
+        rhs: Box<Expr>,
+    },
+    Literal(Token),
+    Grouping(Box<Expr>),
+    Unknown,
 }
 
 #[derive(Debug)]
 pub enum BinOp {
-    Add,
-    Subtract,
-    Multiplicate,
-    Divide,
+    // Main Binary Operations
+    Add,      // +
+    Subtract, // -
+    Multiply, // *
+    Divide,   // /
+
+    // Binary Comparison Operations
+    Eq,     // ==
+    NotEq,  // !=
+    GTOrEq, // >=
+    LTOrEq, // <=
+    GT,     // >
+    LT,     // <
+}
+
+/// Binary Unary Operations
+#[derive(Debug)]
+pub enum UnaryOp {
+    Not,      // !
+    Negative, // -
+
+    Unknown,
 }
 
 #[derive(Debug)]
 pub struct Parameter {
-    name: String,
-    ty: String,
+    pub name: Token,
+    pub ty: Token,
 }

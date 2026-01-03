@@ -1,21 +1,22 @@
 use crate::{
-    diagnostic::{Diagnostic, DiagnosticKind, DiagnosticReporter},
-    utils::{LiteralKind, Span, Token, TokenType as Ty},
+    compiler::Compiler,
+    diagnostic::{Diagnostic, DiagnosticKind},
+    utils::{Span, Token, TokenType as Ty},
 };
 
 #[derive(Debug)]
 pub struct Lexer<'a> {
     index: usize,
     source: &'a str,
-    reporter: DiagnosticReporter,
+    compiler: &'a Compiler,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(source: &'a str) -> Self {
+    pub fn new(compiler: &'a Compiler) -> Self {
         Self {
             index: 0,
-            source,
-            reporter: DiagnosticReporter::new(),
+            source: &compiler.curr_source,
+            compiler,
         }
     }
 
@@ -24,15 +25,15 @@ impl<'a> Lexer<'a> {
         while let Some(v) = self.next() {
             match v {
                 Ok(token) => tokens.push(token),
-                Err(diagnostic) => self.reporter.add(diagnostic),
+                Err(diagnostic) => self.compiler.reporter.borrow_mut().add(diagnostic),
             }
         }
 
-        if self.reporter.has_error() {
-            self.reporter.report(self.source);
-        }
-
         tokens
+    }
+
+    fn span(&self, start: usize, end: usize) -> Span {
+        Span::new(start, end, self.compiler.get_curr_file_id())
     }
 
     fn identify_keyword_or_id(&mut self, start: usize) -> Ty {
@@ -45,12 +46,6 @@ impl<'a> Lexer<'a> {
         }
 
         match &self.source[start..self.index] {
-            "isize" => Ty::KISIZE,
-            "i128" => Ty::KI128,
-            "i64" => Ty::KI64,
-            "i32" => Ty::KI32,
-            "i16" => Ty::KI16,
-            "i8" => Ty::KI8,
             "var" => Ty::KVariable,
             "mut" => Ty::KMutable,
             "const" => Ty::KConstant,
@@ -81,13 +76,9 @@ impl<'a> Lexer<'a> {
         }
 
         if has_dot {
-            Ty::Literal(LiteralKind::Float(
-                self.source[start..self.index].to_string(),
-            ))
+            Ty::Float(self.source[start..self.index].to_string())
         } else {
-            Ty::Literal(LiteralKind::Integer(
-                self.source[start..self.index].to_string(),
-            ))
+            Ty::Integer(self.source[start..self.index].to_string())
         }
     }
 
@@ -97,6 +88,7 @@ impl<'a> Lexer<'a> {
         while let Some(c) = self.peek() {
             let start = self.index;
             if c == '\\' {
+                self.advance();
                 match self.peek() {
                     Some('n') => result.push('\n'),
                     Some('t') => result.push('\t'),
@@ -113,12 +105,12 @@ impl<'a> Lexer<'a> {
                                 result.push(byte as char);
                             } else {
                                 return Err(
-                                    self.error("Invalid hex escape", Span::new(start, self.index))
+                                    self.error("Invalid hex escape", self.span(start, self.index))
                                 );
                             }
                         } else {
                             return Err(
-                                self.error("Incomplete hex escape", Span::new(start, self.index))
+                                self.error("Incomplete hex escape", self.span(start, self.index))
                             );
                         }
                     }
@@ -126,7 +118,7 @@ impl<'a> Lexer<'a> {
                         // Unicode escapes: \u{1F600}
                         if self.peek() != Some('{') {
                             return Err(
-                                self.error("Expected '{' after \\u", Span::new(start, self.index))
+                                self.error("Expected '{' after \\u", self.span(start, self.index))
                             );
                         }
                         let mut unicode = String::new();
@@ -144,29 +136,34 @@ impl<'a> Lexer<'a> {
                             } else {
                                 return Err(self.error(
                                     "Invalid Unicode code point",
-                                    Span::new(start, self.index),
+                                    self.span(start, self.index),
                                 ));
                             }
                         } else {
                             return Err(
-                                self.error("Invalid Unicode escape", Span::new(start, self.index))
+                                self.error("Invalid Unicode escape", self.span(start, self.index))
                             );
                         }
                     }
                     Some(c) => {
                         return Err(self.error(
                             format!("Unknown escape: \\{}", c),
-                            Span::new(start, self.index),
+                            self.span(start, self.index),
                         ))
                     }
                     None => {
                         return Err(self.error(
                             "Unexpected end of input after \\",
-                            Span::new(start, self.index),
+                            self.span(start, self.index),
                         ))
                     }
                 }
+                self.advance();
+            } else if c == '"' {
+                self.advance();
+                break;
             } else {
+                self.advance();
                 result.push(c);
             }
         }
@@ -175,19 +172,11 @@ impl<'a> Lexer<'a> {
     }
 
     fn peek(&self) -> Option<char> {
-        self.source.chars().next()
+        self.source.chars().nth(self.index)
     }
 
-    // fn peek_front(&self) -> Option<char> {
-    //     let mut chars = self.source.chars();
-    //     self.peek();
-    //     self.peek()
-    // }
-
     fn advance(&mut self) {
-        if let Some(ch) = self.peek() {
-            self.index += ch.len_utf8();
-        }
+        self.index += 1;
     }
 
     fn error(&mut self, message: impl Into<String>, span: Span) -> Diagnostic {
@@ -206,7 +195,10 @@ impl<'a> Iterator for Lexer<'a> {
                     continue;
                 } else if c == '\0' {
                     self.advance();
-                    return Some(Ok(Token::new(Ty::Eof, Span::new(self.index, self.index))));
+                    return Some(Ok(Token::new(
+                        Ty::Eof,
+                        self.span(self.index - 1, self.index - 1),
+                    )));
                 }
                 break;
             } else {
@@ -215,7 +207,7 @@ impl<'a> Iterator for Lexer<'a> {
         }
 
         let start = self.index;
-        let mut ty: Ty = Ty::Eof;
+        let mut ty: Ty = Ty::Unknown;
         if let Some(c) = self.peek() {
             self.advance();
             ty = match c {
@@ -272,10 +264,17 @@ impl<'a> Iterator for Lexer<'a> {
                 },
 
                 '+' => Ty::Plus,
-                '-' => Ty::Minus,
+                '-' => match self.peek() {
+                    Some('>') => {
+                        self.advance();
+                        Ty::RightArrow
+                    }
+                    _ => Ty::Minus,
+                },
                 '*' => Ty::Asterisk,
                 '/' => Ty::Slash,
                 ':' => Ty::Colon,
+                ',' => Ty::Comma,
 
                 '\'' => match self.peek() {
                     Some(c) if c != '\\' => {
@@ -283,12 +282,12 @@ impl<'a> Iterator for Lexer<'a> {
                         match self.peek() {
                             Some('\'') => {
                                 self.advance();
-                                Ty::Literal(LiteralKind::Char(c))
+                                Ty::Char(c)
                             }
                             _ => {
                                 self.error(
                                     "Expected end of char quote.",
-                                    Span::new(start, self.index),
+                                    self.span(start, self.index),
                                 );
                                 Ty::Unknown
                             }
@@ -298,7 +297,12 @@ impl<'a> Iterator for Lexer<'a> {
                 },
 
                 '"' => match self.identify_string_literal() {
-                    Ok(string) => Ty::Literal(LiteralKind::String(string)),
+                    Ok(string) => {
+                        return Some(Ok(Token::new(
+                            Ty::String(string),
+                            self.span(start, self.index - 3),
+                        )))
+                    }
                     Err(e) => return Some(Err(e)),
                 },
 
@@ -306,14 +310,14 @@ impl<'a> Iterator for Lexer<'a> {
                 '0'..='9' => self.identify_number(start),
 
                 _ => {
-                    return Some(Err(
-                        self.error("Unknown token used: '{ch}'", Span::new(start, start))
-                    ))
+                    return Some(Err(self.error(
+                        format!("{}: '{}'", "Unknown token used", c),
+                        self.span(start, start),
+                    )))
                 }
             };
         }
-        let end = self.index;
-
-        Some(Ok(Token::new(ty, Span::new(start, end))))
+        let end = self.index - 1;
+        Some(Ok(Token::new(ty, self.span(start, end))))
     }
 }

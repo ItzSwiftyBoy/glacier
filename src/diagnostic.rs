@@ -1,4 +1,4 @@
-use crate::utils::Span;
+use crate::{compiler::Compiler, utils::Span};
 use colored::Colorize;
 
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
@@ -12,8 +12,6 @@ pub struct Diagnostic {
     pub kind: DiagnosticKind,
     pub message: String,
     pub span: Span,
-    pub note: Vec<String>,
-    pub hint: Vec<String>,
 }
 
 impl Diagnostic {
@@ -22,12 +20,10 @@ impl Diagnostic {
             kind: level,
             message,
             span,
-            note: Vec::new(),
-            hint: Vec::new(),
         }
     }
 
-    pub fn with_note(mut self, note: String) -> Self {
+    /* pub fn with_note(mut self, note: String) -> Self {
         self.note.push(note);
         self
     }
@@ -35,13 +31,13 @@ impl Diagnostic {
     pub fn with_hint(mut self, hint: String) -> Self {
         self.hint.push(hint);
         self
-    }
+    } */
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct DiagnosticReporter {
     diagnostics: Vec<Diagnostic>,
-    error: u8,
+    error: u16,
 }
 
 impl DiagnosticReporter {
@@ -53,7 +49,7 @@ impl DiagnosticReporter {
     }
 
     pub fn add(&mut self, diagnostic: Diagnostic) {
-        if diagnostic.kind == DiagnosticKind::Error && self.has_error() {
+        if diagnostic.kind == DiagnosticKind::Error {
             self.error += 1;
         }
         self.diagnostics.push(diagnostic);
@@ -63,11 +59,11 @@ impl DiagnosticReporter {
         self.error != 0
     }
 
-    pub fn report(&self, source: &str) {
+    pub fn report(&self, compiler: &Compiler) {
         for diagnostic in &self.diagnostics {
             match diagnostic.kind {
                 DiagnosticKind::Error => {
-                    eprint!(
+                    eprintln!(
                         "{}: {}",
                         "Error".red().bold(),
                         diagnostic.message.to_string().bright_white().bold()
@@ -77,6 +73,7 @@ impl DiagnosticReporter {
             }
 
             let span = &diagnostic.span;
+            let source = &Compiler::get_file_source(compiler.get_module_filepath(span.file_id));
             let (line, column) = self.get_line_and_column(source, span.start);
             let line_content = {
                 let start = source[..span.start].rfind('\n').map(|i| i + 1).unwrap_or(0);
@@ -87,25 +84,40 @@ impl DiagnosticReporter {
                 &source[start..end]
             };
 
-            eprintln!("\t{}", format!("{}:{}", line, column).bright_white().bold());
-            eprintln!("  |");
-            eprintln!("{} |  {}", line, line_content);
-            eprintln!("  |  {:>width$}", "^", width = column);
-            if self.error < 1 {
-                eprintln!(
-                    "{}",
-                    format!("{} errors have been emitted.", self.error)
-                        .bright_white()
-                        .bold()
+            eprintln!(
+                "\t{}",
+                format!(
+                    "--> {} {}:{}",
+                    compiler.get_module_filepath(span.file_id).display(),
+                    line,
+                    column
                 )
-            } else {
-                eprintln!(
-                    "{}",
-                    format!("{} error has been emitted.", self.error)
-                        .bright_white()
-                        .bold()
-                )
-            }
+                .bright_green()
+                .bold()
+            );
+            eprintln!("{}", format!("  |").cyan().bold());
+            eprintln!("{}  {}", format!("{} |", line).cyan().bold(), line_content);
+            eprintln!(
+                "{}",
+                format!("  |  {:>width$}", "^", width = column)
+                    .cyan()
+                    .bold()
+            );
+        }
+        if self.error < 1 {
+            eprintln!(
+                "{}",
+                format!("{} errors have been emitted.", self.error)
+                    .bright_white()
+                    .bold()
+            )
+        } else {
+            eprintln!(
+                "{}",
+                format!("{} error has been emitted.", self.error)
+                    .bright_white()
+                    .bold()
+            )
         }
     }
 
