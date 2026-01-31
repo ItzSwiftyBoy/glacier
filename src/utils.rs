@@ -25,6 +25,12 @@ impl<'a> Span {
     }
 }
 
+impl Display for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}->{}]", self.start, self.end)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Default)]
 pub enum TokenType {
     LParen,
@@ -55,13 +61,14 @@ pub enum TokenType {
     KVariable,
     KMutable,
     KConstant,
+    KReturn,
     KFunction,
     KStruct,
     KClass,
 
     Integer(String),
     Float(String),
-    Char(char),
+    Char(String),
     String(String),
 
     Identifier(String),
@@ -108,24 +115,58 @@ impl Display for TokenType {
                 TokenType::KFunction => "func",
                 TokenType::KStruct => "struct",
                 TokenType::KClass => "class",
-                // Token::Integer(int, _) => int,
-                // Token::Float(float, _) => float,
-                // Token::Char(ch, _) => ch,
-                // Token::String(string, _) => string,
+                TokenType::Integer(int) => int,
+                TokenType::Float(float) => float,
+                TokenType::Char(ch) => ch,
+                TokenType::String(string) => string,
                 TokenType::Semicolon => ";",
                 TokenType::Eof => "<EOF>",
-                _ => unreachable!(),
+                TokenType::RightArrow => "=>",
+                TokenType::KReturn => "return",
+                TokenType::Identifier(ident) => ident,
+                TokenType::Unknown => "<UNKNOWN>",
             }
         )
     }
 }
 
+impl PartialEq<&TokenType> for TokenType {
+    fn eq(&self, other: &&TokenType) -> bool {
+        *self == **other
+    }
+}
+
+impl PartialEq<&Token> for TokenType {
+    fn eq(&self, other: &&Token) -> bool {
+        *self == other.ty
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Default)]
-pub struct Token(pub TokenType, pub Span);
+pub struct Token {
+    pub ty: TokenType,
+    pub span: Span,
+}
 
 impl Token {
     pub fn new(ty: TokenType, span: Span) -> Self {
-        Self(ty, span)
+        Self { ty, span }
+    }
+
+    pub fn is_eof(&self) -> bool {
+        self.ty == TokenType::Eof
+    }
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}{}", self.ty, self.span)
+    }
+}
+
+impl PartialEq<TokenType> for Token {
+    fn eq(&self, other: &TokenType) -> bool {
+        self.ty == *other
     }
 }
 

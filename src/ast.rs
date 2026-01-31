@@ -1,6 +1,11 @@
 #![allow(dead_code)]
 
-use crate::utils::Token;
+use std::fmt::Display;
+
+use crate::{
+    printer::{AstPrinter, Visitor},
+    utils::Token,
+};
 
 #[derive(Debug)]
 pub struct Ast {
@@ -23,6 +28,17 @@ impl Ast {
     pub fn add_item(&mut self, item: Item) {
         self.items.push(item);
     }
+
+    pub fn visit(&self, visitor: &mut dyn Visitor) {
+        for item in &self.items {
+            visitor.visit_item(item);
+        }
+    }
+
+    pub fn dump(&self) {
+        let mut printer = AstPrinter::new();
+        self.visit(&mut printer);
+    }
 }
 
 #[derive(Debug)]
@@ -38,36 +54,55 @@ pub struct Function {
     pub body: Block,
 }
 
+// impl Display for Function {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         let return_ty = format!(
+//             "{}",
+//             match self.return_ty {
+//                 Some(token) => &format!("{}", token),
+//                 None => "None",
+//             }
+//         );
+//         write!(
+//             f,
+//             "{}({:?}) -> {} {{{}}}",
+//             self.name, self.params, return_ty, self.body
+//         )
+//     }
+// }
+
 #[derive(Debug)]
-pub struct Block {
-    statements: Vec<Statement>,
-    expressions: Vec<Expr>,
-}
+pub struct Block(pub Vec<Statement>);
 
 impl Block {
     pub fn new() -> Self {
-        Self {
-            statements: Vec::new(),
-            expressions: Vec::new(),
-        }
+        Self(Vec::new())
     }
 
     pub fn push_stmt(&mut self, stmt: Statement) {
-        self.statements.push(stmt);
-    }
-
-    pub fn push_expr(&mut self, expr: Expr) {
-        self.expressions.push(expr);
+        self.0.push(stmt);
     }
 }
 
+// impl Iterator for Block {
+//     type Item = Statement;
+//     fn next(&mut self) -> Option<Self::Item> {
+//         for stmt in self.0.iter().clone() {
+//             return Some(stmt);
+//         }
+//         None
+//     }
+// }
+
 #[derive(Debug)]
 pub enum Statement {
-    Var {
+    VarDecl {
         name: Token,
         ty: Option<Token>,
-        expr: Option<Expr>,
+        expr: Expr,
     },
+    Return(Expr),
+    Expression(Expr),
     Unknown,
 }
 /* Constant {
@@ -75,14 +110,9 @@ pub enum Statement {
     ty: String,
     expr: Expr,
 },
-VarDecl {
-    name: String,
-    ty: Option<Token>,
-    expr: Option<Expr>,
-},
-Unknown */
+*/
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Expr {
     Binary {
         lhs: Box<Expr>,
@@ -94,11 +124,13 @@ pub enum Expr {
         rhs: Box<Expr>,
     },
     Literal(Token),
+    Var(Token),
     Grouping(Box<Expr>),
+    None,
     Unknown,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum BinOp {
     // Main Binary Operations
     Add,      // +
@@ -115,17 +147,44 @@ pub enum BinOp {
     LT,     // <
 }
 
+impl Display for BinOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                BinOp::Add => "+",
+                BinOp::Subtract => "-",
+                BinOp::Multiply => "*",
+                BinOp::Divide => "/",
+                BinOp::Eq => "==",
+                BinOp::NotEq => "!=",
+                BinOp::GTOrEq => ">=",
+                BinOp::GT => ">",
+                BinOp::LTOrEq => "<=",
+                BinOp::LT => "<",
+            }
+        )
+    }
+}
+
 /// Binary Unary Operations
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum UnaryOp {
-    Not,      // !
+    Negate,   // !
     Negative, // -
 
     Unknown,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Parameter {
     pub name: Token,
     pub ty: Token,
+}
+
+impl Display for Parameter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.name, self.ty)
+    }
 }

@@ -1,5 +1,5 @@
 func main() {
-  var a = 2 * 3 + 5 / 5 - (13 - 20 / 4);
-  var b = 2;
-  return a;
+  var a = 2 * 3 + 5 / 5 - (13 - 20 ) / 4;
+  var b = ;
+  return 54
 }

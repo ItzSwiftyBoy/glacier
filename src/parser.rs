@@ -1,5 +1,6 @@
 use crate::ast::{BinOp, Block, Expr, Function, Item, Parameter, Statement, UnaryOp};
 use crate::compiler::Compiler;
+use crate::diag;
 use crate::diagnostic::{Diagnostic, DiagnosticKind};
 use crate::utils::Span;
 use crate::{
@@ -27,18 +28,21 @@ impl<'a> Parser<'a> {
     pub fn parse(&mut self) -> Ast {
         let mut ast = Ast::new();
         while !self.is_at_end() {
-            let item = match self.advance_ty() {
-                Ty::KFunction => Item::Func(self.parse_function()),
-                _ => {
-                    self.error("Unexpected token found.");
-                    self.sync();
-                    Item::Unknown
-                }
-            };
-            ast.add_item(item);
+            ast.add_item(self.parse_item());
         }
 
         ast
+    }
+
+    fn parse_item(&mut self) -> Item {
+        match self.advance_ty() {
+            Ty::KFunction => Item::Func(self.parse_function()),
+            _ => {
+                self.error_on_prev_span("Unexpected token found.");
+                self.sync(false);
+                Item::Unknown
+            }
+        }
     }
 
     fn parse_function(&mut self) -> Function {
@@ -90,7 +94,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_stmt(&mut self) -> Statement {
-        if self.current().is_none() {
+        if self.current().is_eof() {
             self.error("Expected a Statement or `}`. Found <EOF>.");
             return Statement::Unknown;
         }
@@ -103,18 +107,33 @@ impl<'a> Parser<'a> {
                     self.consume(Ty::Colon);
                     ty = self.consume_ident();
                 }
-                let mut expr: Option<Expr> = None;
-                while !self.is_curr_token(Ty::Semicolon) {
-                    self.consume(Ty::Eq);
-                    expr = Some(self.parse_expr());
+                let mut expr = Expr::None;
+                if self.is_curr_token(Ty::Eq) {
+                    self.advance();
+                    expr = self.parse_expr();
+                    if expr == Expr::None {
+                        self.error_with_diag(diag!(
+                            "Unexpected '=' without expression.",
+                            "Provide an expression.",
+                            self.previous_span()
+                        ));
+                    }
+                } else {
+                    self.terminate();
                 }
-                self.consume(Ty::Semicolon);
-                Statement::Var { name, ty, expr }
+                Statement::VarDecl { name, ty, expr }
             }
+            Ty::KReturn => Statement::Return(self.parse_expr()),
             _ => {
-                self.error_on_prev_span("Unexpected token found.");
-                self.sync();
-                Statement::Unknown
+                self.current -= 1;
+                let expr = self.parse_expr();
+                self.sync(true);
+                if expr == Expr::Unknown {
+                    self.error_on_prev_span("Unexpected token found.");
+                    Statement::Unknown
+                } else {
+                    Statement::Expression(expr)
+                }
             }
         }
     }
@@ -216,7 +235,7 @@ impl<'a> Parser<'a> {
     fn unary(&mut self) -> Expr {
         if self.is_curr_token(Ty::Not) || self.is_curr_token(Ty::Minus) {
             let op = match self.advance_ty() {
-                Ty::Not => UnaryOp::Not,
+                Ty::Not => UnaryOp::Negate,
                 _ => UnaryOp::Negative,
             };
 
@@ -234,128 +253,134 @@ impl<'a> Parser<'a> {
             || self.is_curr_token_char()
             || self.is_curr_token_string()
         {
-            return Expr::Literal(self.advance());
-        }
-
-        if self.is_curr_token(Ty::LParen) {
+            return Expr::Literal(self.advance().clone());
+        } else if self.is_curr_token_ident() {
+            return Expr::Var(self.advance().clone());
+        } else if self.is_curr_token(Ty::LParen) {
             self.advance();
             let expr = Box::new(self.parse_expr());
             self.consume(Ty::RParen);
             return Expr::Grouping(expr);
+        } else if self.is_curr_token(Ty::Semicolon) {
+            self.terminate();
+            return Expr::None;
+        } else {
+            self.error("Expected an expression.");
+            return Expr::Unknown;
         }
-
-        Expr::Unknown
     }
 
     fn peek(&self, offset: usize) -> Option<&Token> {
         self.tokens.get(self.current + offset)
     }
 
-    fn current(&self) -> Option<&Token> {
-        self.peek(0)
+    fn current(&self) -> &Token {
+        self.peek(0).unwrap()
     }
 
-    fn current_ty(&self) -> Ty {
-        self.current().unwrap().0.clone()
+    fn current_ty(&self) -> &Ty {
+        &self.current().ty
     }
 
     fn current_span(&self) -> Span {
-        self.current().unwrap().1
+        self.current().span
     }
 
-    fn previous(&self) -> Option<&Token> {
-        self.tokens.get(self.current - 1)
+    fn previous(&self) -> &Token {
+        self.tokens.get(self.current - 1).unwrap()
     }
 
-    fn previous_ty(&self) -> Ty {
-        self.previous().unwrap().0.clone()
+    fn previous_ty(&self) -> &Ty {
+        &self.previous().ty
     }
 
     fn previous_span(&self) -> Span {
-        self.previous().unwrap().1
+        self.previous().span
+    }
+
+    fn error_with_diag(&mut self, diagnostic: Diagnostic) {
+        self.compiler.reporter.borrow_mut().add(diagnostic);
     }
 
     fn error(&mut self, message: impl Into<String>) {
-        self.compiler.reporter.borrow_mut().add(Diagnostic::new(
-            DiagnosticKind::Error,
-            message.into(),
-            self.current_span(),
-        ));
+        self.error_with_diag(diag!(message.into(), self.current_span()));
     }
 
     fn error_on_prev_span(&mut self, message: impl Into<String>) {
-        self.compiler.reporter.borrow_mut().add(Diagnostic::new(
-            DiagnosticKind::Error,
-            message.into(),
-            self.previous_span(),
-        ));
+        self.compiler
+            .reporter
+            .borrow_mut()
+            .add(diag!(message.into(), self.previous_span()))
     }
 
-    fn sync(&mut self) {
+    fn sync(&mut self, sync_with_semicolon: bool) {
         while !self.is_at_end() {
-            if self.previous_ty() == Ty::Semicolon {
+            if Ty::Semicolon == self.previous_ty() && sync_with_semicolon {
                 break;
             }
 
             match self.current_ty() {
-                Ty::KClass | Ty::KStruct | Ty::KFunction | Ty::KVariable => break,
+                Ty::KClass | Ty::KStruct | Ty::KFunction => break,
                 _ => {}
             }
             self.advance();
         }
     }
 
-    fn advance(&mut self) -> Token {
-        if self.current().is_none() {
-            panic!("Cannot Advance........");
-        }
-        let prev_token = self.current().unwrap().clone();
-        self.current += 1;
-        prev_token
+    fn terminate(&mut self) {
+        self.consume(Ty::Semicolon);
     }
 
-    fn advance_ty(&mut self) -> Ty {
-        self.advance().0
+    fn advance(&mut self) -> &Token {
+        self.current += 1;
+        self.previous()
+    }
+
+    fn advance_ty(&mut self) -> &Ty {
+        &self.advance().ty
     }
 
     fn consume(&mut self, token_type: Ty) {
-        if self.current().is_none() {
+        if self.current().is_eof() {
             self.error("Unexpected <EOF>.");
             return;
         }
 
-        if self.current_ty() == token_type {
-            self.advance();
+        if *self.advance() == token_type {
         } else {
-            self.error(format!("Expected token: `{}`", token_type));
+            self.error_with_diag(diag!(
+                format!("Expected token: `{}`", token_type),
+                format!("Put {} here.", token_type),
+                self.current_span()
+            ));
         }
     }
 
     fn consume_ident(&mut self) -> Option<Token> {
-        if self.current().is_none() {
+        if self.current().is_eof() {
             self.error("Unexpected <EOF>.");
             return None;
         }
 
         let ident = match self.current_ty() {
-            Ty::Identifier(_) => self.current().unwrap().clone(),
+            Ty::Identifier(_) => Some(self.current().clone()),
             _ => {
                 return None;
             }
         };
         self.advance();
 
-        Some(ident)
+        ident
     }
 
     fn must_consume_ident(&mut self) -> Token {
-        if self.current().is_none() {
+        if self.current().is_eof() {
             self.error("Unexpected <EOF>.");
             return Token::default();
         }
 
         let ident = match self.current_ty() {
-            Ty::Identifier(_) => self.current().unwrap().clone(),
+            Ty::Identifier(_) => self.current().clone(),
             _ => {
                 self.error("Expected an identifier.");
                 return Token::default();
@@ -367,7 +392,7 @@ impl<'a> Parser<'a> {
     }
 
     fn is_curr_token(&self, token_type: Ty) -> bool {
-        self.current_ty() == token_type
+        token_type == self.current_ty()
     }
 
     fn is_curr_token_int(&self) -> bool {
@@ -384,6 +409,10 @@ impl<'a> Parser<'a> {
 
     fn is_curr_token_string(&self) -> bool {
         matches!(self.current_ty(), Ty::String(_))
+    }
+
+    fn is_curr_token_ident(&self) -> bool {
+        matches!(self.current_ty(), Ty::Identifier(_))
     }
 
     fn is_at_end(&self) -> bool {

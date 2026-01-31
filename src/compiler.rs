@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{diagnostic::DiagnosticReporter, utils::FileId};
+use crate::{ast::Ast, diagnostic::DiagnosticReporter, utils::FileId};
 
 #[derive(Debug)]
 pub struct Compiler {
@@ -14,15 +14,17 @@ pub struct Compiler {
     modules: Vec<PathBuf>,
     curr_file_id: FileId,
     pub reporter: RefCell<DiagnosticReporter>,
+    dump_ast: bool,
 }
 
 impl Compiler {
-    pub fn new(filepath: &str) -> Self {
+    pub fn new(filepath: &str, dump_ast: bool) -> Self {
         Self {
             curr_source: Self::get_file_source(Path::new(filepath)),
             modules: vec![PathBuf::from(filepath)],
             curr_file_id: 0,
             reporter: RefCell::new(DiagnosticReporter::new()),
+            dump_ast,
         }
     }
 
@@ -72,6 +74,12 @@ impl Compiler {
             .as_path()
             .file_name()
             .unwrap()
+    }
+
+    pub fn dump_ast(&self, ast: Ast) {
+        if self.dump_ast {
+            println!("{:#?}", ast)
+        }
     }
 
     pub fn print_error(&self) {

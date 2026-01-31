@@ -1,30 +1,39 @@
-use clap::{Arg, Command};
+use clap::{Arg, Command, Parser};
 use compiler::Compiler;
 use lexer::Lexer;
-use parser::Parser;
 
 mod compiler;
 mod diagnostic;
+mod printer;
 mod utils;
 
-mod lexer;
-
 mod ast;
+mod lexer;
 mod parser;
 
-fn main() {
-    let cmd = Command::new("glacier").arg(Arg::new("file").required(true));
+#[derive(clap::Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct GlacierArgs {
+    #[arg(value_name = "FILE", required = true)]
+    file: String,
 
-    let compiler = Compiler::new(
-        cmd.get_matches()
-            .get_one::<String>("file")
-            .expect("Expected a filename!"),
-    );
+    #[arg(long)]
+    dump_ast: bool,
+}
+
+fn main() {
+    // let cmd = Command::new("glacier").arg(Arg::new("file").required(true));
+    // args.get_matches()
+    //     .get_one::<String>("file")
+    //     .expect("Expected a filename!"),
+    let args = GlacierArgs::parse();
+
+    let compiler = Compiler::new(&args.file, args.dump_ast);
 
     let tokens = Lexer::new(&compiler).identify_tokens();
     // // println!("{:#?}", tokens);
-    let mut parser = Parser::new(&compiler, tokens);
+    let mut parser = parser::Parser::new(&compiler, tokens);
     let ast = parser.parse();
-    println!("{:#?}", ast);
+    compiler.dump_ast(ast);
     compiler.print_error();
 }

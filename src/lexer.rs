@@ -1,5 +1,6 @@
 use crate::{
     compiler::Compiler,
+    diag,
     diagnostic::{Diagnostic, DiagnosticKind},
     utils::{Span, Token, TokenType as Ty},
 };
@@ -9,6 +10,9 @@ pub struct Lexer<'a> {
     index: usize,
     source: &'a str,
     compiler: &'a Compiler,
+    match_paren: (i16, usize),
+    match_curly: (i16, usize),
+    match_brace: (i16, usize),
 }
 
 impl<'a> Lexer<'a> {
@@ -17,6 +21,9 @@ impl<'a> Lexer<'a> {
             index: 0,
             source: &compiler.curr_source,
             compiler,
+            match_paren: (0, 0),
+            match_curly: (0, 0),
+            match_brace: (0, 0),
         }
     }
 
@@ -30,6 +37,38 @@ impl<'a> Lexer<'a> {
         }
 
         tokens
+    }
+
+    fn start_paren(&mut self) {
+        self.match_paren.0 += 1;
+        self.match_paren.1 = self.index;
+    }
+
+    fn start_curly(&mut self) {
+        self.match_curly.0 += 1;
+        self.match_curly.1 = self.index;
+    }
+
+    fn start_brace(&mut self) {
+        self.match_brace.0 += 1;
+        self.match_brace.1 = self.index;
+    }
+
+    fn match_paren(&mut self) {
+        self.match_paren.0 -= 1;
+    }
+
+    fn match_curly(&mut self) {
+        self.match_curly.0 -= 1;
+    }
+
+    fn match_brace(&mut self) {
+        self.match_brace.0 -= 1;
+    }
+
+    /// `check_brackets()` is a function that will do the checking of matching
+    fn check_brackets(&self) -> bool {
+        self.match_paren.0 > 0 || self.match_curly.0 > 0 || self.match_brace.0 > 0
     }
 
     fn span(&self, start: usize, end: usize) -> Span {
@@ -49,6 +88,7 @@ impl<'a> Lexer<'a> {
             "var" => Ty::KVariable,
             "mut" => Ty::KMutable,
             "const" => Ty::KConstant,
+            "return" => Ty::KReturn,
             "func" => Ty::KFunction,
             "struct" => Ty::KStruct,
             "class" => Ty::KClass,
@@ -180,7 +220,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn error(&mut self, message: impl Into<String>, span: Span) -> Diagnostic {
-        Diagnostic::new(DiagnosticKind::Error, message.into(), span)
+        diag!(message.into(), span)
     }
 }
 
@@ -282,7 +322,7 @@ impl<'a> Iterator for Lexer<'a> {
                         match self.peek() {
                             Some('\'') => {
                                 self.advance();
-                                Ty::Char(c)
+                                Ty::Char(format!("{}", c))
                             }
                             _ => {
                                 self.error(
