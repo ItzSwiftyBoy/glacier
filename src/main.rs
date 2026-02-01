@@ -13,7 +13,7 @@ mod parser;
 
 #[derive(clap::Parser, Debug)]
 #[command(version, about, long_about = None)]
-struct GlacierArgs {
+struct OliveArgs {
     #[arg(value_name = "FILE", required = true)]
     file: String,
 
@@ -26,7 +26,7 @@ fn main() {
     // args.get_matches()
     //     .get_one::<String>("file")
     //     .expect("Expected a filename!"),
-    let args = GlacierArgs::parse();
+    let args = OliveArgs::parse();
 
     let compiler = Compiler::new(&args.file, args.dump_ast);
 
