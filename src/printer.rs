@@ -1,55 +1,9 @@
-use std::fmt::{write, Display};
-
 use colored::Colorize;
 
 use crate::{
-    ast::{BinOp, Block, Expr, Function, Item, Statement},
-    utils::{Token, TokenType as Ty},
+    ast::{BinOp, Block, Expr, Function, Visitor},
+    utils::{Token, TokenKind as Ty},
 };
-
-pub trait Visitor {
-    fn do_visit_item(&mut self, item: &Item) {
-        match item {
-            Item::Func(function) => {
-                self.visit_func(function);
-            }
-            Item::Unknown => unimplemented!(),
-        }
-    }
-    fn visit_item(&mut self, item: &Item) {
-        self.do_visit_item(item);
-    }
-    // fn do_visit_func(&mut self, function: &Function) {
-    //     self.visit_func(function);
-    // }
-    fn visit_func(&mut self, function: &Function);
-    fn do_visit_stmt(&mut self, stmt: &Statement) {
-        match stmt {
-            Statement::VarDecl { name, ty, expr } => self.visit_var_decl(name, ty, expr),
-            Statement::Expression(expr) => self.visit_expr(expr),
-            _ => unimplemented!(),
-        }
-    }
-    fn visit_block(&mut self, block: &Block);
-    fn visit_stmt(&mut self, stmt: &Statement) {
-        self.do_visit_stmt(stmt);
-    }
-    fn visit_var_decl(&mut self, name: &Token, ty: &Option<Token>, expr: &Expr);
-    fn do_visit_expr(&mut self, expr: &Expr) {
-        match expr {
-            Expr::Binary { lhs, op, rhs } => self.visit_binary_expr(lhs, op, rhs),
-            Expr::Var(v) => self.visit_ident(v),
-            Expr::Literal(literal) => self.visit_literal(literal),
-            _ => unimplemented!(),
-        }
-    }
-    fn visit_expr(&mut self, expr: &Expr) {
-        self.do_visit_expr(expr);
-    }
-    fn visit_binary_expr(&mut self, lhs: &Box<Expr>, op: &BinOp, rhs: &Box<Expr>);
-    fn visit_ident(&mut self, ident: &Token);
-    fn visit_literal(&mut self, literal: &Token);
-}
 
 pub struct AstPrinter {
     indent: usize,
@@ -90,7 +44,7 @@ impl Visitor for AstPrinter {
     fn visit_func(&mut self, function: &Function) {
         self.print_with_indent(&format!("{}: Function {{", function.name));
         self.incr_indent();
-        if function.params.len() != 0 {
+        if !function.params.is_empty() {
             self.print_with_indent("params: [");
             self.incr_indent();
             for param in &function.params {
@@ -108,7 +62,7 @@ impl Visitor for AstPrinter {
         }
         self.visit_block(&function.body);
         self.decr_indent();
-        self.print_with_indent(&format!("}}"));
+        self.print_with_indent("}");
     }
 
     fn visit_block(&mut self, block: &Block) {

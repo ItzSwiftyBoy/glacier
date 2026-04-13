@@ -1,4 +1,4 @@
-use clap::{Arg, Command, Parser};
+use clap::Parser;
 use compiler::Compiler;
 use lexer::Lexer;
 
@@ -10,6 +10,8 @@ mod utils;
 mod ast;
 mod lexer;
 mod parser;
+mod symbol;
+mod types;
 
 #[derive(clap::Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -30,10 +32,12 @@ fn main() {
 
     let compiler = Compiler::new(&args.file, args.dump_ast);
 
-    let tokens = Lexer::new(&compiler).identify_tokens();
-    // // println!("{:#?}", tokens);
+    let tokens = match Lexer::new(&compiler).identify_tokens() {
+        Some(tokens) => tokens,
+        None => return,
+    };
+    // println!("{:#?}", tokens);
     let mut parser = parser::Parser::new(&compiler, tokens);
     let ast = parser.parse();
-    compiler.dump_ast(ast);
-    compiler.print_error();
+    compiler.dump_ast(&ast);
 }

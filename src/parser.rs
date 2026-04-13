@@ -2,46 +2,46 @@ use crate::ast::{BinOp, Block, Expr, Function, Item, Parameter, Statement, Unary
 use crate::compiler::Compiler;
 use crate::diag;
 use crate::diagnostic::{Diagnostic, DiagnosticKind};
-use crate::utils::Span;
+use crate::utils::TokenStream;
 use crate::{
     ast::Ast,
-    utils::{Token, TokenType as Ty},
+    utils::{Token, TokenKind as Ty},
 };
 
 pub struct Parser<'a> {
-    current: usize,
-    // source: &'a str,
+    stream: TokenStream,
     compiler: &'a Compiler,
-    tokens: Vec<Token>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(compiler: &'a Compiler, tokens: Vec<Token>) -> Self {
-        Self {
-            current: 0,
-            // source: compiler.source,
-            compiler,
-            tokens,
-        }
+    pub fn new(compiler: &'a Compiler, stream: TokenStream) -> Self {
+        Self { stream, compiler }
     }
 
     pub fn parse(&mut self) -> Ast {
         let mut ast = Ast::new();
-        while !self.is_at_end() {
-            ast.add_item(self.parse_item());
+        while let Some(item) = self.parse_item() {
+            ast.add_item(item);
         }
 
         ast
     }
 
-    fn parse_item(&mut self) -> Item {
-        match self.advance_ty() {
-            Ty::KFunction => Item::Func(self.parse_function()),
-            _ => {
-                self.error_on_prev_span("Unexpected token found.");
-                self.sync(false);
-                Item::Unknown
-            }
+    fn parse_item(&mut self) -> Option<Item> {
+        self.stream.ignore_newline();
+
+        if let Some(ty) = self.stream.advance_ty() {
+            Some(match ty {
+                Ty::KFunction => Item::Func(self.parse_function()),
+                _ => {
+                    self.error_on_prev_span("Unexpected token found.");
+                    self.sync(true, false);
+                    self.stream.ignore_newline();
+                    Item::Unknown
+                }
+            })
+        } else {
+            None
         }
     }
 
@@ -49,36 +49,35 @@ impl<'a> Parser<'a> {
         let name = self.must_consume_ident();
         let mut params: Vec<Parameter> = Vec::new();
         let mut return_ty: Option<Token> = None;
-        let mut body: Block = Block::new();
 
         self.consume(Ty::LParen);
-        while !self.is_curr_token(Ty::RParen) {
+        while !self.stream.is_curr_token(Ty::RParen) {
             params = self.parse_params();
         }
         self.consume(Ty::RParen);
 
-        if self.is_curr_token(Ty::RightArrow) {
+        if self.stream.is_curr_token(Ty::RightArrow) {
             self.consume(Ty::RightArrow);
-            return_ty = self.consume_ident();
+            return_ty = self.consume_ident().cloned();
         }
 
-        self.consume(Ty::LCurly);
-        while !self.is_curr_token(Ty::RCurly) {
-            body.push_stmt(self.parse_stmt());
-        }
-        self.consume(Ty::RCurly);
+        let body = self.parse_block();
 
-        Function {
+        let func = Function {
             name,
             params,
             body,
             return_ty,
-        }
+        };
+
+        self.compiler.project.add_module(module_name);
+
+        func
     }
 
     fn parse_params(&mut self) -> Vec<Parameter> {
         let mut params: Vec<Parameter> = vec![self.parse_param()];
-        while self.is_curr_token(Ty::Comma) {
+        while self.stream.is_curr_token(Ty::Comma) {
             self.consume(Ty::Comma);
             params.push(self.parse_param());
         }
@@ -93,41 +92,72 @@ impl<'a> Parser<'a> {
         Parameter { name, ty }
     }
 
-    fn parse_stmt(&mut self) -> Statement {
-        if self.current().is_eof() {
-            self.error("Expected a Statement or `}`. Found <EOF>.");
-            return Statement::Unknown;
+    fn parse_block(&mut self) -> Block {
+        let mut body = Block::new();
+        while let Some(stmt) = self.parse_stmt() {
+            body.push_stmt(stmt);
+        }
+        body
+    }
+
+    fn parse_stmt(&mut self) -> Option<Statement> {
+        if self.stream.is_curr_token(Ty::LCurly) {
+            self.stream.advance();
         }
 
-        match self.advance_ty() {
+        self.stream.ignore_newline();
+
+        if self.stream.is_curr_token(Ty::RCurly) {
+            self.stream.advance();
+            return None;
+        }
+
+        if self.stream.is_at_end() {
+            self.diagnostic(diag!(
+                "Unexpected <EOF>.",
+                "Expected a Statement, an Expression, or `}`.",
+                self.stream.current_span()
+            ));
+            self.diagnostic(diag!(
+                DiagnosticKind::Hint("}".to_string()),
+                "Put a `}` to end the block.",
+                "",
+                self.stream.current_span()
+            ));
+            return None;
+        }
+
+        Some(match self.stream.advance_ty().unwrap() {
             Ty::KVariable => {
                 let name = self.must_consume_ident();
                 let mut ty: Option<Token> = None;
-                if self.is_curr_token(Ty::Colon) {
+                if self.stream.is_curr_token(Ty::Colon) {
                     self.consume(Ty::Colon);
-                    ty = self.consume_ident();
+                    ty = self.consume_ident().cloned();
                 }
                 let mut expr = Expr::None;
-                if self.is_curr_token(Ty::Eq) {
-                    self.advance();
+                if self.stream.is_curr_token(Ty::Eq) {
+                    self.consume(Ty::Eq);
                     expr = self.parse_expr();
                     if expr == Expr::None {
-                        self.error_with_diag(diag!(
+                        self.diagnostic(diag!(
                             "Unexpected '=' without expression.",
                             "Provide an expression.",
-                            self.previous_span()
+                            self.stream.previous_span()
                         ));
                     }
-                } else {
-                    self.terminate();
                 }
                 Statement::VarDecl { name, ty, expr }
             }
             Ty::KReturn => Statement::Return(self.parse_expr()),
+            Ty::LCurly => Statement::Block(self.parse_block()),
             _ => {
-                self.current -= 1;
+                self.stream -= 1;
                 let expr = self.parse_expr();
-                self.sync(true);
+                if self.stream.is_curr_token(Ty::RCurly) {
+                    return Some(Statement::Expression(expr));
+                }
+                self.sync(false, true);
                 if expr == Expr::Unknown {
                     self.error_on_prev_span("Unexpected token found.");
                     Statement::Unknown
@@ -135,18 +165,24 @@ impl<'a> Parser<'a> {
                     Statement::Expression(expr)
                 }
             }
-        }
+        })
     }
 
     fn parse_expr(&mut self) -> Expr {
-        self.equality()
+        if self.stream.is_curr_token(Ty::Semicolon) {
+            self.terminate();
+            return Expr::None;
+        }
+        let expr = self.equality();
+        self.terminate();
+        expr
     }
 
     fn equality(&mut self) -> Expr {
         let mut expr = self.comparison();
 
-        while self.is_curr_token(Ty::NotEq) || self.is_curr_token(Ty::DoubleEq) {
-            let op = match self.advance_ty() {
+        while self.stream.is_curr_token(Ty::NotEq) || self.stream.is_curr_token(Ty::DoubleEq) {
+            let op = match self.stream.advance_ty().unwrap() {
                 Ty::NotEq => BinOp::NotEq,
                 _ => BinOp::Eq,
             };
@@ -166,12 +202,12 @@ impl<'a> Parser<'a> {
     fn comparison(&mut self) -> Expr {
         let mut expr = self.term();
 
-        while self.is_curr_token(Ty::GT)
-            || self.is_curr_token(Ty::GTEq)
-            || self.is_curr_token(Ty::LT)
-            || self.is_curr_token(Ty::LTEq)
+        while self.stream.is_curr_token(Ty::GT)
+            || self.stream.is_curr_token(Ty::GTEq)
+            || self.stream.is_curr_token(Ty::LT)
+            || self.stream.is_curr_token(Ty::LTEq)
         {
-            let op = match self.advance_ty() {
+            let op = match self.stream.advance_ty().unwrap() {
                 Ty::GT => BinOp::GT,
                 Ty::GTEq => BinOp::GTOrEq,
                 Ty::LT => BinOp::LT,
@@ -193,8 +229,8 @@ impl<'a> Parser<'a> {
     fn term(&mut self) -> Expr {
         let mut expr = self.factor();
 
-        while self.is_curr_token(Ty::Plus) || self.is_curr_token(Ty::Minus) {
-            let op = match self.advance_ty() {
+        while self.stream.is_curr_token(Ty::Plus) || self.stream.is_curr_token(Ty::Minus) {
+            let op = match self.stream.advance_ty().unwrap() {
                 Ty::Plus => BinOp::Add,
                 _ => BinOp::Subtract,
             };
@@ -214,8 +250,8 @@ impl<'a> Parser<'a> {
     fn factor(&mut self) -> Expr {
         let mut expr = self.unary();
 
-        while self.is_curr_token(Ty::Asterisk) || self.is_curr_token(Ty::Slash) {
-            let op = match self.advance_ty() {
+        while self.stream.is_curr_token(Ty::Asterisk) || self.stream.is_curr_token(Ty::Slash) {
+            let op = match self.stream.advance_ty().unwrap() {
                 Ty::Asterisk => BinOp::Multiply,
                 _ => BinOp::Divide,
             };
@@ -233,8 +269,8 @@ impl<'a> Parser<'a> {
     }
 
     fn unary(&mut self) -> Expr {
-        if self.is_curr_token(Ty::Not) || self.is_curr_token(Ty::Minus) {
-            let op = match self.advance_ty() {
+        if self.stream.is_curr_token(Ty::Not) || self.stream.is_curr_token(Ty::Minus) {
+            let op = match self.stream.advance_ty().unwrap() {
                 Ty::Not => UnaryOp::Negate,
                 _ => UnaryOp::Negative,
             };
@@ -248,174 +284,143 @@ impl<'a> Parser<'a> {
     }
 
     fn primary(&mut self) -> Expr {
-        if self.is_curr_token_int()
-            || self.is_curr_token_float()
-            || self.is_curr_token_char()
-            || self.is_curr_token_string()
+        if self.stream.is_curr_token_int()
+            || self.stream.is_curr_token_float()
+            || self.stream.is_curr_token_char()
+            || self.stream.is_curr_token_string()
         {
-            return Expr::Literal(self.advance().clone());
-        } else if self.is_curr_token_ident() {
-            return Expr::Var(self.advance().clone());
-        } else if self.is_curr_token(Ty::LParen) {
-            self.advance();
+            Expr::Literal(self.stream.advance().unwrap().clone())
+        } else if self.stream.is_curr_token_ident() {
+            Expr::Var(self.stream.advance().unwrap().clone())
+        } else if self.stream.is_curr_token(Ty::LParen) {
+            self.stream.advance();
             let expr = Box::new(self.parse_expr());
             self.consume(Ty::RParen);
-            return Expr::Grouping(expr);
-        } else if self.is_curr_token(Ty::Semicolon) {
-            self.terminate();
-            return Expr::None;
+            Expr::Grouping(expr)
         } else {
             self.error("Expected an expression.");
-            return Expr::Unknown;
+            Expr::Unknown
         }
     }
 
-    fn peek(&self, offset: usize) -> Option<&Token> {
-        self.tokens.get(self.current + offset)
-    }
-
-    fn current(&self) -> &Token {
-        self.peek(0).unwrap()
-    }
-
-    fn current_ty(&self) -> &Ty {
-        &self.current().ty
-    }
-
-    fn current_span(&self) -> Span {
-        self.current().span
-    }
-
-    fn previous(&self) -> &Token {
-        self.tokens.get(self.current - 1).unwrap()
-    }
-
-    fn previous_ty(&self) -> &Ty {
-        &self.previous().ty
-    }
-
-    fn previous_span(&self) -> Span {
-        self.previous().span
-    }
-
-    fn error_with_diag(&mut self, diagnostic: Diagnostic) {
+    fn diagnostic(&mut self, diagnostic: Diagnostic) {
         self.compiler.reporter.borrow_mut().add(diagnostic);
     }
 
     fn error(&mut self, message: impl Into<String>) {
-        self.error_with_diag(diag!(message.into(), self.current_span()));
+        self.diagnostic(diag!(message.into(), self.stream.current_span()));
     }
 
     fn error_on_prev_span(&mut self, message: impl Into<String>) {
-        self.compiler
-            .reporter
-            .borrow_mut()
-            .add(diag!(message.into(), self.previous_span()))
+        self.diagnostic(diag!(message.into(), self.stream.previous_span()))
     }
 
-    fn sync(&mut self, sync_with_semicolon: bool) {
-        while !self.is_at_end() {
-            if Ty::Semicolon == self.previous_ty() && sync_with_semicolon {
+    fn terminate(&mut self) -> bool {
+        if self.consume(Ty::Semicolon).is_none() {
+            self.diagnostic(diag!(
+                DiagnosticKind::Hint(";".to_string()),
+                format!("Terminate the statement with a `;`."),
+                "",
+                self.stream.previous_span()
+            ));
+            self.stream.ignore_newline();
+            false
+        // } else if terminate_by_comma && self.consume(Ty::Comma).is_none() {
+        //     self.diagnostic(diag!(
+        //         DiagnosticKind::Hint(",".to_string()),
+        //         format!("Put a `,` here."),
+        //         "",
+        //         self.tokens.get(self.current - 1).unwrap().span
+        //     ));
+        //     self.ignore_newline();
+        //     false
+        // } else if (terminate_by_comma && self.consume(Ty::Comma).is_some())
+        //     || (!terminate_by_comma && self.consume(Ty::Semicolon).is_some())
+        // {
+        //     self.advance();
+        //     self.ignore_newline();
+        //     true
+        } else {
+            self.stream.ignore_newline();
+            true
+        }
+    }
+
+    fn sync(&mut self, skip_semicolon: bool, skip_item_keywords: bool) {
+        while !self.stream.is_at_end() {
+            if Ty::Semicolon == self.stream.previous_ty() && !skip_semicolon {
                 break;
             }
 
-            match self.current_ty() {
-                Ty::KClass | Ty::KStruct | Ty::KFunction => break,
-                _ => {}
+            if skip_item_keywords {
+                match self.stream.current_ty() {
+                    Ty::KVariable => break,
+                    _ => {}
+                }
+            } else {
+                match self.stream.current_ty() {
+                    Ty::KClass | Ty::KStruct | Ty::KFunction => break,
+                    _ => {}
+                }
             }
-            self.advance();
+            self.stream.advance();
         }
     }
 
-    fn terminate(&mut self) {
-        self.consume(Ty::Semicolon);
-    }
-
-    fn advance(&mut self) -> &Token {
-        self.current += 1;
-        self.previous()
-    }
-
-    fn advance_ty(&mut self) -> &Ty {
-        &self.advance().ty
-    }
-
-    fn consume(&mut self, token_type: Ty) {
-        if self.current().is_eof() {
-            self.error("Unexpected <EOF>.");
-            return;
-        }
-
-        if *self.advance() == token_type {
+    fn consume(&mut self, token_type: Ty) -> Option<&Token> {
+        if self.stream.is_at_end() {
+            self.diagnostic(diag!(
+                format!("Expected token: `{}`", token_type),
+                format!("Unexpected <EOF>."),
+                self.stream.current_span()
+            ));
+            None
+        } else if token_type == self.stream.advance() {
+            Some(self.stream.previous())
         } else {
-            self.error_with_diag(diag!(
+            self.diagnostic(diag!(
                 format!("Expected token: `{}`", token_type),
                 format!("Put {} here.", token_type),
-                self.current_span()
+                self.stream.previous_span()
             ));
+            None
         }
     }
 
-    fn consume_ident(&mut self) -> Option<Token> {
-        if self.current().is_eof() {
+    fn consume_ident(&mut self) -> Option<&Token> {
+        if self.stream.is_at_end() {
             self.error("Unexpected <EOF>.");
             return None;
         }
 
-        let ident = match self.current_ty() {
-            Ty::Identifier(_) => Some(self.current().clone()),
-            _ => {
-                return None;
-            }
+        self.stream.advance();
+        let ident = if self.stream.is_curr_token_ident() {
+            Some(self.stream.previous())
+        } else {
+            None
         };
-        self.advance();
 
         ident
     }
 
     fn must_consume_ident(&mut self) -> Token {
-        if self.current().is_eof() {
-            self.error("Unexpected <EOF>.");
+        if self.stream.is_at_end() {
+            self.diagnostic(diag!(
+                "Unexpected <EOF>.",
+                "Expected an identifier",
+                self.stream.current_span()
+            ));
             return Token::default();
         }
 
-        let ident = match self.current_ty() {
-            Ty::Identifier(_) => self.current().clone(),
+        let ident = match self.stream.advance_ty() {
+            Some(&Ty::Identifier(_)) => self.stream.previous().clone(),
             _ => {
-                self.error("Expected an identifier.");
+                self.error_on_prev_span("Expected an identifier.");
                 return Token::default();
             }
         };
-        self.advance();
 
         ident
-    }
-
-    fn is_curr_token(&self, token_type: Ty) -> bool {
-        token_type == self.current_ty()
-    }
-
-    fn is_curr_token_int(&self) -> bool {
-        matches!(self.current_ty(), Ty::Integer(_))
-    }
-
-    fn is_curr_token_float(&self) -> bool {
-        matches!(self.current_ty(), Ty::Float(_))
-    }
-
-    fn is_curr_token_char(&self) -> bool {
-        matches!(self.current_ty(), Ty::Char(_))
-    }
-
-    fn is_curr_token_string(&self) -> bool {
-        matches!(self.current_ty(), Ty::String(_))
-    }
-
-    fn is_curr_token_ident(&self) -> bool {
-        matches!(self.current_ty(), Ty::Identifier(_))
-    }
-
-    fn is_at_end(&self) -> bool {
-        self.current == self.tokens.len()
     }
 }
