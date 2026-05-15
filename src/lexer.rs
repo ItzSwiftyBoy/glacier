@@ -1,7 +1,6 @@
 use crate::{
     compiler::Compiler,
-    diag,
-    diagnostic::{Diagnostic, DiagnosticKind},
+    diagnostic::{error, CompilerError, Diagnostic},
     utils::{Span, Token, TokenKind as Ty, TokenStream},
 };
 
@@ -9,9 +8,7 @@ pub struct Lexer<'a> {
     index: usize,
     source: &'a str,
     compiler: &'a Compiler,
-    match_paren: Vec<usize>,
-    match_curly: Vec<usize>,
-    match_boxed: Vec<usize>,
+    match_brackets: Vec<(Ty, usize)>,
 }
 
 impl<'a> Lexer<'a> {
@@ -20,9 +17,7 @@ impl<'a> Lexer<'a> {
             index: 0,
             source: &compiler.curr_source_content,
             compiler,
-            match_paren: vec![],
-            match_curly: vec![],
-            match_boxed: vec![],
+            match_brackets: vec![],
         }
     }
 
@@ -45,27 +40,33 @@ impl<'a> Lexer<'a> {
     }
 
     fn start_paren(&mut self) -> Ty {
-        self.match_paren.push(self.index - 1);
+        self.match_brackets.push((Ty::LParen, self.index - 1));
         Ty::LParen
     }
 
     fn start_curly(&mut self) -> Ty {
-        self.match_curly.push(self.index - 1);
+        self.match_brackets.push((Ty::LCurly, self.index - 1));
         Ty::LCurly
     }
 
     fn start_boxed(&mut self) -> Ty {
-        self.match_boxed.push(self.index - 1);
+        self.match_brackets.push((Ty::LBoxed, self.index - 1));
         Ty::LBoxed
     }
 
     /// `match_paren()` is a function that will do the check if the parentheses have matched properly or is there any parentheses extra.
     fn match_paren(&mut self) -> Ty {
-        if self.match_paren.pop().is_none() {
-            self.push_diag(diag!(
-                "Extra parentheses used.",
-                "Remove the parentheses.",
-                self.span(self.index - 1, self.index - 1)
+        let poped_bracket = self.match_brackets.pop();
+        if poped_bracket.is_none() {
+            self.push_diag(error(
+                CompilerError::ExtraParen,
+                self.span(self.index - 1, self.index - 1),
+            ));
+        } else if poped_bracket.as_ref().unwrap().0 != Ty::LParen {
+            let expected_bracket = poped_bracket.unwrap().0.get_opposite_bracket();
+            self.push_diag(error(
+                CompilerError::UnexpectedParen(expected_bracket),
+                self.span(self.index - 1, self.index - 1),
             ));
         }
         Ty::RParen
@@ -73,11 +74,19 @@ impl<'a> Lexer<'a> {
 
     /// `match_curly()` is a function that will do the check if the curly brackets have matched properly or is there any curly bracket extra.
     fn match_curly(&mut self) -> Ty {
-        if self.match_curly.pop().is_none() {
-            self.push_diag(diag!(
-                "Extra curly bracket used.",
-                "Remove the curly bracket.",
-                self.span(self.index - 1, self.index - 1)
+        let poped_bracket = self.match_brackets.pop();
+        if let Some(bracket) = poped_bracket {
+            if bracket.0 != Ty::LCurly {
+                let expected_bracket = bracket.0.get_opposite_bracket();
+                self.push_diag(error(
+                    CompilerError::UnexpectedCurly(expected_bracket),
+                    self.span(self.index - 1, self.index - 1),
+                ));
+            }
+        } else {
+            self.push_diag(error(
+                CompilerError::ExtraCurly,
+                self.span(self.index - 1, self.index - 1),
             ));
         }
         Ty::RCurly
@@ -85,40 +94,36 @@ impl<'a> Lexer<'a> {
 
     /// `match_boxed()` is a function that will do the check if the square brackets have matched properly or is there any square bracket extra.
     fn match_boxed(&mut self) -> Ty {
-        if self.match_boxed.pop().is_none() {
-            self.push_diag(diag!(
-                "Extra square bracket used.",
-                "Remove the square bracket.",
-                self.span(self.index - 1, self.index - 1)
+        let poped_bracket = self.match_brackets.pop();
+        if let Some(bracket) = poped_bracket {
+            if bracket.0 != Ty::LBoxed {
+                let expected_bracket = bracket.0.get_opposite_bracket();
+                self.push_diag(error(
+                    CompilerError::UnexpectedBoxed(expected_bracket),
+                    self.span(self.index - 1, self.index - 1),
+                ));
+            }
+        } else {
+            self.push_diag(error(
+                CompilerError::ExtraBoxed,
+                self.span(self.index - 1, self.index - 1),
             ));
         }
         Ty::RBoxed
     }
 
-    /// `check_unmatched_brackets()` does the checking of unmatched parentheses, curly, and squared brackets. If found it will throw an error.
+    /// `check_unmatched_brackets()` does the checking of unmatched parentheses, curly, and square brackets. If found it will throw an error.
     fn check_unmatched_brackets(&mut self) {
-        while let Some(span) = self.match_paren.pop() {
-            self.push_diag(diag!(
-                "Unmatched parentheses.",
-                "Match the parentheses somewhere.",
-                self.span(span, span)
-            ))
-        }
-
-        while let Some(span) = self.match_curly.pop() {
-            self.push_diag(diag!(
-                "Unmatched curly bracket.",
-                "Match the curly bracket somewhere.",
-                self.span(span, span)
-            ))
-        }
-
-        while let Some(span) = self.match_boxed.pop() {
-            self.push_diag(diag!(
-                "Unmatched squared bracket.",
-                "Match the squared bracket somewhere.",
-                self.span(span, span)
-            ))
+        while let Some(bracket) = self.match_brackets.pop() {
+            let ty = bracket.0;
+            let span = bracket.1;
+            if ty == Ty::LParen {
+                self.push_diag(error(CompilerError::UnmatchedParen, self.span(span, span)))
+            } else if ty == Ty::LCurly {
+                self.push_diag(error(CompilerError::UnmatchedCurly, self.span(span, span)))
+            } else if ty == Ty::LBoxed {
+                self.push_diag(error(CompilerError::UnmatchedBoxed, self.span(span, span)))
+            }
         }
     }
 
@@ -126,6 +131,7 @@ impl<'a> Lexer<'a> {
         Span::new(start, end, self.compiler.get_curr_file_id())
     }
 
+    /// Checks if the source has any keyword or `IDENT`.
     fn identify_keyword_or_id(&mut self, start: usize) -> Ty {
         while let Some(c) = self.peek() {
             if c.is_alphanumeric() || c == '_' {
@@ -143,6 +149,25 @@ impl<'a> Lexer<'a> {
             "func" => Ty::KFunction,
             "struct" => Ty::KStruct,
             "class" => Ty::KClass,
+
+            "int8" => Ty::KInt(8),
+            "int16" => Ty::KInt(16),
+            "int32" => Ty::KInt(32),
+            "int64" => Ty::KInt(64),
+            "int128" => Ty::KInt(128),
+            "isize" => Ty::KISize,
+
+            "uint8" => Ty::KUInt(8),
+            "uint16" => Ty::KUInt(16),
+            "uint32" => Ty::KUInt(32),
+            "uint64" => Ty::KUInt(64),
+            "uint128" => Ty::KUInt(128),
+            "usize" => Ty::KUSize,
+
+            "f16" => Ty::KFloat(16),
+            "f32" => Ty::KFloat(32),
+            "f64" => Ty::KFloat(64),
+
             id => Ty::Identifier(id.to_string()),
         }
     }
@@ -175,6 +200,7 @@ impl<'a> Lexer<'a> {
 
     fn identify_string_literal(&mut self) -> Result<String, Diagnostic> {
         let mut result = String::new();
+        let start = self.index;
 
         while let Some(c) = self.peek() {
             let start = self.index;
@@ -195,22 +221,25 @@ impl<'a> Lexer<'a> {
                             if let Ok(byte) = u8::from_str_radix(&hex_str, 16) {
                                 result.push(byte as char);
                             } else {
-                                return Err(
-                                    self.error("Invalid hex escape", self.span(start, self.index))
-                                );
+                                return Err(error(
+                                    CompilerError::InvalidHexEsc,
+                                    self.span(start, self.index),
+                                ));
                             }
                         } else {
-                            return Err(
-                                self.error("Incomplete hex escape", self.span(start, self.index))
-                            );
+                            return Err(error(
+                                CompilerError::IncompleteHexEsc,
+                                self.span(start, self.index),
+                            ));
                         }
                     }
                     Some('u') => {
-                        // Unicode escapes: \u{1F600}
+                        // Unicode escapes (example): \u{1F600}
                         if self.peek() != Some('{') {
-                            return Err(
-                                self.error("Expected '{' after \\u", self.span(start, self.index))
-                            );
+                            return Err(error(
+                                CompilerError::ExpectedLCurlyAfterUniEsc,
+                                self.span(start, self.index),
+                            ));
                         }
                         let mut unicode = String::new();
                         while let Some(next) = self.peek() {
@@ -225,26 +254,27 @@ impl<'a> Lexer<'a> {
                             if let Some(c) = char::from_u32(code_point) {
                                 result.push(c);
                             } else {
-                                return Err(self.error(
-                                    "Invalid Unicode code point",
+                                return Err(error(
+                                    CompilerError::InvalidUniCodePoint,
                                     self.span(start, self.index),
                                 ));
                             }
                         } else {
-                            return Err(
-                                self.error("Invalid Unicode escape", self.span(start, self.index))
-                            );
+                            return Err(error(
+                                CompilerError::InvalidUniEsc,
+                                self.span(start, self.index),
+                            ));
                         }
                     }
                     Some(c) => {
-                        return Err(self.error(
-                            format!("Unknown escape: \\{}", c),
+                        return Err(error(
+                            CompilerError::UnknownEsc(c),
                             self.span(start, self.index),
                         ))
                     }
                     None => {
-                        return Err(self.error(
-                            "Unexpected end of input after \\",
+                        return Err(error(
+                            CompilerError::UnexpectedEOF,
                             self.span(start, self.index),
                         ))
                     }
@@ -272,10 +302,6 @@ impl<'a> Lexer<'a> {
 
     fn push_diag(&mut self, diagnostic: Diagnostic) {
         self.compiler.reporter.borrow_mut().add(diagnostic);
-    }
-
-    fn error(&mut self, message: impl Into<String>, span: Span) -> Diagnostic {
-        diag!(message.into(), span)
     }
 }
 
@@ -384,11 +410,11 @@ impl<'a> Iterator for Lexer<'a> {
                         match self.peek() {
                             Some('\'') => {
                                 self.advance();
-                                Ty::Char(format!("{}", c))
+                                Ty::Char(c.to_string())
                             }
                             _ => {
-                                self.error(
-                                    "Expected end of char quote.",
+                                error(
+                                    CompilerError::UnmatchedSingleQuote,
                                     self.span(start, self.index),
                                 );
                                 Ty::Unknown
@@ -412,8 +438,8 @@ impl<'a> Iterator for Lexer<'a> {
                 '0'..='9' => self.identify_number(start),
 
                 _ => {
-                    return Some(Err(self.error(
-                        format!("{}: '{}'", "Unknown token used", c),
+                    return Some(Err(error(
+                        CompilerError::UnknownChar(c),
                         self.span(start, start),
                     )))
                 }

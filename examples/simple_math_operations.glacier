@@ -1,3 +1,5 @@
 func main() {
-  return;
+  let x = 7;
+  let! y = (x + 75) * 3 - (x * 2 - 2) / 4;
+  y += x * 7;
 }

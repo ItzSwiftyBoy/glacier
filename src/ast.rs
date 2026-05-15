@@ -2,7 +2,7 @@
 
 use std::fmt::Display;
 
-use crate::{printer::AstPrinter, types::Type, utils::Token};
+use crate::{types::Type, utils::Token};
 
 #[derive(Debug)]
 pub struct Ast {
@@ -14,28 +14,20 @@ impl Ast {
         Self { items: Vec::new() }
     }
 
-    // pub fn add_function(&mut self, name: String, param: Vec<Parameter>, body: Vec<Statement>) {
-    //     self.add_element(Element::FuncScope { name, param, body });
-    // }
-
-    // pub fn add_const_element(&mut self, name: String, ty: Type, expr: Expr) {
-    //     self.add_element(Element::Constant { name, ty, expr });
-    // }
-
     pub fn add_item(&mut self, item: Item) {
         self.items.push(item);
     }
 
-    pub fn visit(&self, visitor: &mut dyn Visitor) {
-        for item in &self.items {
-            visitor.visit_item(item);
-        }
-    }
+    // pub fn visit(&self, visitor: &mut dyn Visitor) {
+    //     for item in &self.items {
+    //         visitor.visit_item(item);
+    //     }
+    // }
 
-    pub fn dump(&self) {
-        let mut printer = AstPrinter::new();
-        self.visit(&mut printer);
-    }
+    // pub fn dump(&self) {
+    //     let mut printer = AstPrinter::new();
+    //     self.visit(&mut printer);
+    // }
 }
 
 #[derive(Debug)]
@@ -44,11 +36,11 @@ pub enum Item {
     Unknown,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Function {
     pub name: Token,
     pub params: Vec<Parameter>,
-    pub return_ty: Option<Token>,
+    pub return_ty: Type,
     pub body: Block,
 }
 
@@ -69,7 +61,7 @@ pub struct Function {
 //     }
 // }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Block(pub Vec<Statement>);
 
 impl Block {
@@ -92,13 +84,9 @@ impl Block {
 //     }
 // }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Statement {
-    VarDecl {
-        name: Token,
-        ty: Option<Token>,
-        expr: Expr,
-    },
+    VarDecl { name: Token, ty: Type, expr: Expr },
     Return(Expr),
     Expression(Expr),
     Block(Block),
@@ -111,44 +99,33 @@ pub enum Statement {
 },
 */
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub struct TypedExpr {
-    expr: Expr,
-    ty: Type,
-}
-
-impl TypedExpr {
-    pub fn new(expr: Expr) -> Self {
-        Self {
-            expr,
-            ty: Type::Unknown,
-        }
-    }
-
-    pub fn ty(&mut self, ty: Type) {
-        self.ty = ty
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Expr {
     Binary {
         lhs: Box<Expr>,
         op: BinOp,
         rhs: Box<Expr>,
+        ty: Type,
     },
     Unary {
         op: UnaryOp,
         rhs: Box<Expr>,
+        ty: Type,
     },
-    Literal(Token),
+
+    // Literals.
+    IntLit(Token),
+    FloatLit(Token),
+    CharLit(Token),
+    StringLit(Token),
+
     Var(Token),
     Grouping(Box<Expr>),
     None,
     Unknown,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum BinOp {
     // Main Binary Operations
     Add,      // +
@@ -187,7 +164,7 @@ impl Display for BinOp {
 }
 
 /// Binary Unary Operations
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum UnaryOp {
     Negate,   // !
     Negative, // -
@@ -195,7 +172,7 @@ pub enum UnaryOp {
     Unknown,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Parameter {
     pub name: Token,
     pub ty: Token,
@@ -207,7 +184,7 @@ impl Display for Parameter {
     }
 }
 
-pub trait Visitor {
+/*pub trait Visitor {
     fn do_visit_item(&mut self, item: &Item) {
         match item {
             Item::Func(function) => {
@@ -226,7 +203,7 @@ pub trait Visitor {
     fn do_visit_stmt(&mut self, stmt: &Statement) {
         match stmt {
             Statement::VarDecl { name, ty, expr } => self.visit_var_decl(name, ty, expr),
-            Statement::Expression(expr) => self.visit_expr(expr),
+            Statement::Expression(typed_expr) => self.visit_typed_expr(typed_expr),
             _ => unimplemented!(),
         }
     }
@@ -234,7 +211,7 @@ pub trait Visitor {
     fn visit_stmt(&mut self, stmt: &Statement) {
         self.do_visit_stmt(stmt);
     }
-    fn visit_var_decl(&mut self, name: &Token, ty: &Option<Token>, expr: &Expr);
+    fn visit_var_decl(&mut self, name: &Token, ty: &Type, expr: &Expr);
     fn do_visit_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::Binary { lhs, op, rhs } => self.visit_binary_expr(lhs, op, rhs),
@@ -243,10 +220,11 @@ pub trait Visitor {
             _ => unimplemented!(),
         }
     }
-    fn visit_expr(&mut self, expr: &Expr) {
-        self.do_visit_expr(expr);
+    fn visit_typed_expr(&mut self, typed_expr: &TypedExpr) {
+        self.do_visit_expr(&typed_expr.expr);
     }
     fn visit_binary_expr(&mut self, lhs: &Box<Expr>, op: &BinOp, rhs: &Box<Expr>);
     fn visit_ident(&mut self, ident: &Token);
     fn visit_literal(&mut self, literal: &Token);
 }
+*/

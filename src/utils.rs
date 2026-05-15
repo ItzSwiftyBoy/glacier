@@ -1,20 +1,14 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    ffi::OsString,
     fmt::Display,
     ops::{AddAssign, SubAssign},
     path::Path,
 };
 
-use crate::{
-    ast::{Function, Parameter},
-    compiler::Compiler,
-    types::Type,
-};
+use crate::compiler::Compiler;
 
 pub type FileId = usize;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Hash, Default)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Default)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -31,7 +25,7 @@ impl<'a> Span {
     }
 
     pub fn len(&self) -> usize {
-        self.end - self.start
+        (self.end - self.start) + 1
     }
 
     pub fn get_filename(&self, compiler: &'a Compiler) -> &'a Path {
@@ -41,12 +35,17 @@ impl<'a> Span {
 
 impl Display for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}->{}]", self.start, self.end)
+        if self.len() == 1 {
+            write!(f, "{}", self.start)
+        } else {
+            write!(f, "{}-{}", self.start, self.end)
+        }
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Default)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Default)]
 pub enum TokenKind {
+    // Punctuation Marks.
     LParen,
     RParen,
     LCurly,
@@ -71,8 +70,11 @@ pub enum TokenKind {
     Slash,
     Colon,
     Comma,
-    Newline,
+    Bang,
 
+    Semicolon,
+
+    // Keywords.
     KVariable,
     KMutable,
     KConstant,
@@ -81,18 +83,39 @@ pub enum TokenKind {
     KStruct,
     KClass,
 
+    // Type Keywords. `usize` here should be the types size (8, 16, 32, 64, 128).
+    KInt(usize),
+    KISize,
+    KUInt(usize),
+    KUSize,
+    KFloat(usize), // The size should be only 16, 32 or 64.
+
+    // Literals.
     Integer(String),
     Float(String),
     Char(String),
     String(String),
-
     Identifier(String),
 
+    // Specials.
     Unknown,
-
-    Semicolon,
+    Newline,
     #[default]
     Eof,
+}
+
+impl TokenKind {
+    pub fn get_opposite_bracket(&self) -> char {
+        match self {
+            Self::LParen => ')',
+            Self::LCurly => '}',
+            Self::LBoxed => ']',
+            Self::RParen => '(',
+            Self::RCurly => '{',
+            Self::RBoxed => '{',
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Display for TokenKind {
@@ -141,6 +164,7 @@ impl Display for TokenKind {
                 Self::RightArrow => "=>",
                 Self::Identifier(ident) => ident,
                 Self::Unknown => "<UNKNOWN>",
+                _ => unreachable!(),
             }
         )
     }
@@ -154,45 +178,42 @@ impl PartialEq<&TokenKind> for TokenKind {
 
 impl PartialEq<&Token> for TokenKind {
     fn eq(&self, other: &&Token) -> bool {
-        *self == other.ty
+        *self == other.0
     }
 }
 
 impl PartialEq<Option<&Token>> for TokenKind {
     fn eq(&self, other: &Option<&Token>) -> bool {
         if let Some(token) = *other {
-            *self == token.ty
+            *self == token.0
         } else {
             false
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Default)]
-pub struct Token {
-    pub ty: TokenKind,
-    pub span: Span,
-}
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Default)]
+pub struct Token(pub TokenKind, pub Span);
 
 impl Token {
     pub fn new(ty: TokenKind, span: Span) -> Self {
-        Self { ty, span }
+        Self(ty, span)
     }
 
     pub fn is_eof(&self) -> bool {
-        self.ty == TokenKind::Eof
+        self.0 == TokenKind::Eof
     }
 }
 
 impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}{}", self.ty, self.span)
+        write!(f, "{}{}", self.0, self.1)
     }
 }
 
 impl PartialEq<TokenKind> for Token {
     fn eq(&self, other: &TokenKind) -> bool {
-        self.ty == *other
+        self.0 == *other
     }
 }
 
@@ -213,71 +234,64 @@ impl TokenStream {
         self.stream.push(token);
     }
 
-    pub fn peek(&self, offset: isize) -> Option<&Token> {
-        self.stream.get((self.current as isize + offset) as usize)
+    pub fn peek(&self, offset: isize) -> &Token {
+        &self.stream[(self.current as isize + offset) as usize]
     }
 
     pub fn previous(&self) -> &Token {
-        self.peek(-1).unwrap()
+        self.peek(-1)
     }
 
     pub fn previous_ty(&self) -> &TokenKind {
-        &self.previous().ty
+        &self.previous().0
     }
 
     pub fn previous_span(&self) -> Span {
-        self.previous().span
+        self.previous().1
     }
 
     pub fn current(&self) -> &Token {
-        self.peek(0).unwrap()
+        self.peek(0)
     }
 
     pub fn current_ty(&self) -> &TokenKind {
-        &self.current().ty
+        &self.current().0
     }
 
     pub fn current_span(&self) -> Span {
-        self.current().span
+        self.current().1
     }
 
-    pub fn advance(&mut self) -> Option<&Token> {
-        if self.is_at_end() {
-            return None;
-        }
+    pub fn advance(&mut self) -> &Token {
         self.current += 1;
-        Some(self.previous())
+        self.previous()
     }
 
-    pub fn advance_ty(&mut self) -> Option<&TokenKind> {
-        if let Some(token) = self.advance() {
-            Some(&token.ty)
-        } else {
-            None
-        }
+    pub fn advance_ty(&mut self) -> &TokenKind {
+        &self.advance().0
     }
 
-    pub fn is_curr_token(&self, token_type: TokenKind) -> bool {
+    pub fn is_curr_token(&mut self, token_type: TokenKind) -> bool {
         token_type == self.current()
     }
 
-    pub fn is_curr_token_int(&self) -> bool {
+    pub fn is_curr_token_int(&mut self) -> bool {
         matches!(self.current_ty(), TokenKind::Integer(_))
     }
 
-    pub fn is_curr_token_float(&self) -> bool {
+    pub fn is_curr_token_float(&mut self) -> bool {
         matches!(self.current_ty(), TokenKind::Float(_))
     }
 
-    pub fn is_curr_token_char(&self) -> bool {
+    pub fn is_curr_token_char(&mut self) -> bool {
         matches!(self.current_ty(), TokenKind::Char(_))
     }
 
-    pub fn is_curr_token_string(&self) -> bool {
+    pub fn is_curr_token_string(&mut self) -> bool {
         matches!(self.current_ty(), TokenKind::String(_))
     }
 
-    pub fn is_curr_token_ident(&self) -> bool {
+    pub fn is_curr_token_ident(&mut self) -> bool {
         matches!(self.current_ty(), TokenKind::Identifier(_))
     }
 

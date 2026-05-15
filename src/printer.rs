@@ -112,7 +112,7 @@ impl Visitor for AstPrinter {
     }
 
     fn visit_literal(&mut self, literal: &Token) {
-        match &literal.ty {
+        match &literal.0 {
             Ty::Integer(int) => self.print_with_indent(&format!("{}", int.cyan())),
             Ty::Float(float) => self.print_with_indent(&format!("{}", float.cyan())),
             Ty::String(str) => self.print_with_indent(&format!("\"{}\"", str.green())),
