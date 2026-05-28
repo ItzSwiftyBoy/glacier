@@ -1,10 +1,7 @@
 use std::{
     fmt::Display,
-    ops::{AddAssign, SubAssign},
-    path::Path,
+    ops::{Add, AddAssign, SubAssign},
 };
-
-use crate::compiler::Compiler;
 
 pub type FileId = usize;
 
@@ -12,24 +9,32 @@ pub type FileId = usize;
 pub struct Span {
     pub start: usize,
     pub end: usize,
-    pub file_id: FileId,
 }
 
 impl<'a> Span {
-    pub fn new(start: usize, end: usize, file_id: FileId) -> Self {
-        Self {
-            start,
-            end,
-            file_id,
-        }
+    pub fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
     }
 
     pub fn len(&self) -> usize {
         (self.end - self.start) + 1
     }
+}
 
-    pub fn get_filename(&self, compiler: &'a Compiler) -> &'a Path {
-        compiler.get_module_filepath(self.file_id)
+impl Add for Span {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        let lhs_len = self.len();
+        let rhs_len = rhs.len();
+
+        let start = if self.start < rhs.start {
+            rhs.start
+        } else {
+            self.start
+        };
+        let end = start + (lhs_len + rhs_len - 2);
+        Self::new(start, end)
     }
 }
 
@@ -58,7 +63,7 @@ pub enum TokenKind {
     GT,
     Eq,
     DoubleEq,
-    Not,
+    Bang,
     NotEq,
     LTEq,
     GTEq,
@@ -70,7 +75,6 @@ pub enum TokenKind {
     Slash,
     Colon,
     Comma,
-    Bang,
 
     Semicolon,
 
@@ -89,6 +93,8 @@ pub enum TokenKind {
     KUInt(usize),
     KUSize,
     KFloat(usize), // The size should be only 16, 32 or 64.
+
+    KMod,
 
     // Literals.
     Integer(String),
@@ -136,7 +142,7 @@ impl Display for TokenKind {
                 Self::GT => ">",
                 Self::Eq => "=",
                 Self::DoubleEq => "==",
-                Self::Not => "!",
+                Self::Bang => "!",
                 Self::NotEq => "!=",
                 Self::LTEq => "<=",
                 Self::GTEq => ">=",
@@ -321,5 +327,15 @@ impl AddAssign<usize> for TokenStream {
 impl SubAssign<usize> for TokenStream {
     fn sub_assign(&mut self, rhs: usize) {
         self.current -= rhs;
+    }
+}
+
+impl Iterator for TokenStream {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let token = self.stream.iter().nth(self.current).cloned();
+        *self += 1;
+        token
     }
 }

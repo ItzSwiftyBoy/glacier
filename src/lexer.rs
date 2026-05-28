@@ -1,6 +1,7 @@
 use crate::{
     compiler::Compiler,
-    diagnostic::{error, CompilerError, Diagnostic},
+    diagnostic::Diagnostic,
+    errors::{error, CompilerError},
     utils::{Span, Token, TokenKind as Ty, TokenStream},
 };
 
@@ -128,7 +129,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn span(&self, start: usize, end: usize) -> Span {
-        Span::new(start, end, self.compiler.get_curr_file_id())
+        Span::new(start, end)
     }
 
     /// Checks if the source has any keyword or `IDENT`.
@@ -168,6 +169,8 @@ impl<'a> Lexer<'a> {
             "f32" => Ty::KFloat(32),
             "f64" => Ty::KFloat(64),
 
+            "mod" => Ty::KMod,
+
             id => Ty::Identifier(id.to_string()),
         }
     }
@@ -200,7 +203,6 @@ impl<'a> Lexer<'a> {
 
     fn identify_string_literal(&mut self) -> Result<String, Diagnostic> {
         let mut result = String::new();
-        let start = self.index;
 
         while let Some(c) = self.peek() {
             let start = self.index;
@@ -301,7 +303,10 @@ impl<'a> Lexer<'a> {
     }
 
     fn push_diag(&mut self, diagnostic: Diagnostic) {
-        self.compiler.reporter.borrow_mut().add(diagnostic);
+        self.compiler
+            .reporter
+            .borrow_mut()
+            .add(diagnostic, self.compiler.get_curr_file_id());
     }
 }
 
@@ -368,7 +373,7 @@ impl<'a> Iterator for Lexer<'a> {
                         self.advance();
                         Ty::NotEq
                     }
-                    _ => Ty::Not,
+                    _ => Ty::Bang,
                 },
 
                 '=' => match self.peek() {

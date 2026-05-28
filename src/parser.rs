@@ -306,9 +306,9 @@ impl<'a> Parser<'a> {
     }
 
     fn unary(&mut self) -> Expr {
-        if self.stream.is_curr_token(Ty::Not) || self.stream.is_curr_token(Ty::Minus) {
+        if self.stream.is_curr_token(Ty::Bang) || self.stream.is_curr_token(Ty::Minus) {
             let op = match self.stream.advance_ty() {
-                Ty::Not => UnaryOp::Negate,
+                Ty::Bang => UnaryOp::Negate,
                 _ => UnaryOp::Negative,
             };
 
@@ -362,7 +362,10 @@ impl<'a> Parser<'a> {
     }
 
     fn diagnostic(&mut self, diagnostic: Diagnostic) {
-        self.compiler.reporter.borrow_mut().add(diagnostic);
+        self.compiler
+            .reporter
+            .borrow_mut()
+            .add(diagnostic, self.compiler.get_curr_file_id());
     }
 
     fn error(&mut self, message: impl Into<String>) {

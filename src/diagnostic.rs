@@ -1,12 +1,14 @@
-use crate::{compiler::Compiler, get_file_content, get_line_from_index, utils::Span};
-use colored::Colorize;
+use crate::{
+    compiler::Compiler,
+    get_file_content, get_line_from_index,
+    utils::{FileId, Span},
+};
+use colored::{ColoredString, Colorize};
 
 #[macro_export]
 macro_rules! diag {
     ( $kind:expr, $p_msg:expr, $s_msg:expr, $span:expr ) => {
-        Diagnostic::new($kind, $span)
-            .with_primary_msg($p_msg)
-            .with_secondary_msg($s_msg)
+        Diagnostic::new($kind, $p_msg, $s_msg, $span)
     };
     ( $p_msg:expr, $span:expr ) => {
         diag!(DiagnosticKind::Error, $p_msg, String::new(), $span)
@@ -34,131 +36,195 @@ fn get_line_and_column(source: &str, index: usize) -> (usize, usize) {
     (line, column)
 }
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq)]
 pub enum DiagnosticKind {
-    #[default]
     Error,
     Warning,
     Hint(String), // 0 = The character that needs to be added
 }
 
-#[derive(Debug, Default)]
+impl DiagnosticKind {
+    pub fn associated_color(&self, input: &str) -> ColoredString {
+        match self {
+            Self::Error => input.bright_red().bold(),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+#[derive(Debug)]
 struct Header {
-    pub level: DiagnosticKind,
-    pub msg: String,
-    pub span: Span,
+    level: DiagnosticKind,
+    msg: String,
+    file_id: FileId,
+    span: Span,
 }
 
 impl Header {
-    pub fn print(&self, compiler: &Compiler, span: Span) {
+    pub fn new(level: DiagnosticKind, msg: String, span: Span) -> Self {
+        Self {
+            level,
+            file_id: 0,
+            msg,
+            span,
+        }
+    }
+
+    pub fn set_file_id(&mut self, file_id: FileId) {
+        self.file_id = file_id;
+    }
+
+    pub fn print(&self, compiler: &Compiler) {
         match self.level {
             DiagnosticKind::Error => {
                 println!("{}: {}", "Error".bright_red().bold(), &self.msg)
             }
             _ => unimplemented!(),
         }
-        let path = span.get_filename(compiler);
-        let (line, column) = get_line_and_column(&get_file_content(path), span.start);
-        print!("--> {} ", path.display());
-        if span.len() == 1 {
+        let path = compiler.get_filepath(self.file_id);
+        let (line, column) = get_line_and_column(&get_file_content(&path), self.span.start);
+        print!(
+            "\t{} ",
+            format!("--> {}", path.display())
+                .custom_color((100, 128, 250))
+                .bold()
+        );
+        if self.span.len() == 1 {
             println!("[{}:{}]", line, column);
         } else {
-            println!("[{}:{}-{}]", line, column, (column + span.len() - 1));
+            println!("[{}:{}-{}]", line, column, (column + self.span.len() - 1));
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SourceWithMsg {
+    file_id: FileId,
+    span: Vec<Span>,
+    msgs: Vec<String>,
+}
+
+impl SourceWithMsg {
+    pub fn new(span: Span, msg: String) -> Self {
+        Self {
+            file_id: 0,
+            span: vec![span],
+            msgs: vec![msg],
+        }
+    }
+
+    // pub fn error(&mut self, msg: impl Into<String>, span: Span, file_id: FileId) {
+    // if !self.msg.is_empty() && !self.0.is_empty() {
+    //     panic!("Cannot push `String` in `Vec` for the first (index 0) element of the `Vec` should be an error message.");
+    // }
+    // self.0.insert(file_id, (msg.into(), span));
+    // }
+
+    pub fn set_file_id(&mut self, file_id: FileId) {
+        self.file_id = file_id;
+    }
+
+    pub fn add_msg(&mut self, msg: impl Into<String>, span: Span) {
+        self.span.push(span);
+        self.msgs.push(msg.into());
+    }
+
+    pub fn print(&self, compiler: &Compiler, level: &DiagnosticKind) {
+        let file_content = get_file_content(&compiler.get_filepath(self.file_id));
+        let line_content = &get_line_from_index(&file_content, self.span[0].start);
+        let (line, column) = get_line_and_column(line_content, self.span[0].start);
+        println!("{} {}", line.to_string().hidden(), "|".bright_purple());
+        println!(
+            "{} {}",
+            format!("{} {}", line, "|").bright_purple(),
+            line_content
+        );
+        println!(
+            "{} {} {:>width$}{} {}",
+            line.to_string().hidden(),
+            "|".bright_purple(),
+            "",
+            level.associated_color(&format!("{:^<width$}", "^", width = self.span[0].len())),
+            level.associated_color(&self.msgs[0]),
+            width = column - 1,
+        );
+        println!("{} {}", line.to_string().hidden(), "|".bright_purple());
+    }
+}
+
+#[derive(Debug, Default)]
+struct Annotation {
+    pub notes: Vec<String>,
+    pub hints: Vec<String>,
+}
+
+impl Annotation {
+    pub fn print(&self) {
+        if self.notes.is_empty() && self.hints.is_empty() {
+            println!();
+            return;
+        }
+        println!("—————————————————————————");
+        for note in &self.notes {
+            println!("\t{} {}: {}", "=>".bright_purple(), "note".on_green(), note);
+        }
+        for hint in &self.hints {
+            println!("\t{} {}: {}", "=>".bright_purple(), "hint".on_cyan(), hint);
         }
         println!();
     }
 }
 
-#[derive(Debug, PartialEq, Default)]
-struct SourceWithMsg<'a> {
-    line: &'a str,
-    msg: Vec<String>,
-    span: Vec<Span>,
-}
-
-impl<'a> SourceWithMsg<'a> {
-    pub fn new(source: &'a str) -> Self {
-        Self {
-            line: get_line_from_index(source, span.start),
-            msg: vec![],
-            span: vec![],
-        }
-    }
-
-    pub fn error(&mut self, msg: impl Into<String>, span: Span) {
-        if !self.msg.is_empty() && !self.span.is_empty() {
-            panic!("Cannot push `String` in `Vec` for the first(index 0) element of the `Vec` can be error message.");
-        }
-        self.msg.push(msg.into());
-        self.span.push(span);
-    }
-
-    pub fn note(&mut self, msg: impl Into<String>, span: Span) {
-        self.msg.push(msg.into());
-        self.span.push(span);
-    }
-
-    pub fn print(self) {
-        println!("{}", "  |".bright_purple());
-        println!("{} {}", , self.line);
-    }
-}
-
-#[derive(Debug, PartialEq, Default)]
-struct Annotation {
-    pub note: String,
-    pub hint: String,
-    pub span: Span,
-}
-
-impl Annotation {
-    pub fn print() {}
-}
-
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Diagnostic {
-    kind: DiagnosticKind,
-    primary_msg: String,
-    secondary_msg: String,
-    context: Option<(String, Span)>,
-    span: Span,
+    header: Header,
+    src: SourceWithMsg,
+    annotation: Annotation,
 }
 
 impl Diagnostic {
-    pub fn new(kind: DiagnosticKind, span: Span) -> Self {
+    pub fn new(
+        kind: DiagnosticKind,
+        primary_msg: impl Into<String>,
+        secondary_msg: impl Into<String>,
+        span: Span,
+    ) -> Self {
         Self {
-            kind,
-            span,
-            ..Default::default()
+            header: Header::new(kind, primary_msg.into(), span),
+            src: SourceWithMsg::new(span, secondary_msg.into()),
+            annotation: Annotation::default(),
         }
     }
 
-    pub fn with_primary_msg(mut self, msg: impl Into<String>) -> Self {
-        self.primary_msg = msg.into();
+    pub fn set_file_id(&mut self, file_id: FileId) {
+        self.header.set_file_id(file_id);
+    }
+
+    pub fn add_note(mut self, note: String) -> Self {
+        self.annotation.notes.push(note);
         self
     }
 
-    pub fn with_secondary_msg(mut self, msg: impl Into<String>) -> Self {
-        self.secondary_msg = msg.into();
+    pub fn add_hint(mut self, hint: String) -> Self {
+        self.annotation.hints.push(hint);
         self
     }
 
-    pub fn with_context(mut self, context: String, span: Span) -> Self {
-        self.context = Some((context, span));
-        self
+    pub fn is_err(&self) -> bool {
+        if self.header.level == DiagnosticKind::Error {
+            true
+        } else {
+            false
+        }
     }
 
-    /* pub fn with_note(mut self, note: String) -> Self {
-        self.note.push(note);
-        self
+    pub fn print(&self, compiler: &Compiler) {
+        self.header.print(compiler);
+        self.src.print(compiler, &self.header.level);
+        self.annotation.print();
     }
 
-    pub fn with_hint(mut self, hint: String) -> Self {
-        self.hint.push(hint);
-        self
-    } */
-
-    fn print_context(&self, source: &str, context: &(String, Span)) {
+    /* fn print_context(&self, source: &str, context: &(String, Span)) {
         let (line, column) = get_line_and_column(source, context.1.end);
         let line_content = {
             let start = source[..context.1.start]
@@ -193,7 +259,7 @@ impl Diagnostic {
         );
     }
 
-    fn print(&self, compiler: &Compiler) {
+    fn print(&self, compiler: &Compiler, file_id: FileId) {
         match self.kind {
             DiagnosticKind::Error => {
                 eprintln!(
@@ -214,7 +280,7 @@ impl Diagnostic {
 
         let context = &self.context;
         let span = &self.span;
-        let source = &get_file_content(span.get_filename(compiler));
+        let source = &get_file_content(&compiler.get_filepath(file_id));
         let (line, column) = get_line_and_column(source, span.end);
         let line_content = get_line_from_index(source, span.start);
 
@@ -228,7 +294,7 @@ impl Diagnostic {
             "\t{}",
             format!(
                 "--> {} {}:{}{}",
-                span.get_filename(compiler).display(),
+                compiler.get_filepath(file_id).display(),
                 line,
                 column,
                 span_end
@@ -287,158 +353,23 @@ impl Diagnostic {
                 self.print_context(source, ctx);
             }
         }
-    }
+    } */
 }
 
-#[derive(Debug)]
-pub enum CompilerError {
-    UnknownChar(char),
-
-    // Brackets errors.
-    ExtraParen,
-    ExtraCurly,
-    ExtraBoxed,
-    UnexpectedParen(char),
-    UnexpectedCurly(char),
-    UnexpectedBoxed(char),
-    UnmatchedParen,
-    UnmatchedCurly,
-    UnmatchedBoxed,
-
-    // char/String errors.
-    UnmatchedSingleQuote,
-    UnknownEsc(char),
-    InvalidHexEsc,
-    IncompleteHexEsc,
-    ExpectedLCurlyAfterUniEsc,
-    InvalidUniCodePoint,
-    InvalidUniEsc,
-
-    UnexpectedEOF,
-}
-
-impl CompilerError {
-    pub fn primary_msg(&self) -> String {
-        match self {
-            Self::UnknownChar(found) => {
-                format!("Unknown character used: `{}`", found)
-            }
-
-            Self::ExtraParen => {
-                format!("Extra `)` used.")
-            }
-            Self::ExtraCurly => {
-                format!("Extra `}}` used.")
-            }
-            Self::ExtraBoxed => {
-                format!("Extra `]` used.")
-            }
-            Self::UnexpectedParen(expected) => {
-                format!("Expected `{}`, Found `)`.", expected)
-            }
-            Self::UnexpectedCurly(expected) => {
-                format!("Expected `{}`, Found `}}`.", expected)
-            }
-            Self::UnexpectedBoxed(expected) => {
-                format!("Expected `{}`, Found `]`.", expected)
-            }
-            Self::UnmatchedParen => {
-                format!("Unmatched parentheses.")
-            }
-            Self::UnmatchedCurly => {
-                format!("Unmatched curly bracket.")
-            }
-            Self::UnmatchedBoxed => {
-                format!("Unmatched squared bracket.")
-            }
-
-            Self::UnmatchedSingleQuote => {
-                format!("Unmatched Single Quote.")
-            }
-            Self::UnknownEsc(escape) => {
-                format!("Unknown Escape: `\\{}`", escape)
-            }
-            Self::InvalidHexEsc => {
-                format!("Invalid hex escape.")
-            }
-            Self::IncompleteHexEsc => {
-                format!("Incomplete hex escape.")
-            }
-            Self::ExpectedLCurlyAfterUniEsc => {
-                format!("Expected `{{` after \\u.")
-            }
-            Self::InvalidUniCodePoint => {
-                format!("Invalid Unicode code point.")
-            }
-            Self::InvalidUniEsc => {
-                format!("Invalid Unicode escape.")
-            }
-
-            Self::UnexpectedEOF => {
-                format!("Unexpected end of file.")
-            }
-        }
-    }
-
-    pub fn secondary_msg(&self) -> String {
-        match self {
-            Self::UnknownChar(found) => {
-                format!("Remove `{}`.", found)
-            }
-
-            Self::ExtraParen => {
-                format!("Remove the extra parentheses.")
-            }
-            Self::ExtraCurly => {
-                format!("Remove the extra curly bracket.")
-            }
-            Self::ExtraBoxed => {
-                format!("Remove the extra squared bracket.")
-            }
-            Self::UnexpectedParen(expected) => {
-                format!("Replace `)` with `{}`.", expected)
-            }
-            Self::UnexpectedCurly(expected) => {
-                format!("Replace `}}` with `{}`.", expected)
-            }
-            Self::UnexpectedBoxed(expected) => {
-                format!("Replace `]` with `{}`.", expected)
-            }
-            Self::UnmatchedParen => {
-                format!("Match the parentheses somewhere.")
-            }
-            Self::UnmatchedCurly => {
-                format!("Match the curly bracket somewhere.")
-            }
-            Self::UnmatchedBoxed => {
-                format!("Match the squared bracket somewhere.")
-            }
-
-            Self::UnmatchedSingleQuote => {
-                format!("Add a single quote here.")
-            }
-
-            _ => String::new(),
-        }
-    }
-}
-
-pub fn error(err_kind: CompilerError, span: Span) -> Diagnostic {
-    Diagnostic::new(DiagnosticKind::Error, span)
-        .with_primary_msg(err_kind.primary_msg())
-        .with_secondary_msg(err_kind.secondary_msg())
-}
-
-pub fn error_with_context(
+/* pub fn error_with_context(
     err_kind: CompilerError,
     context: (String, Span),
     span: Span,
 ) -> Diagnostic {
-    Diagnostic::new(DiagnosticKind::Error, span)
-        .with_primary_msg(err_kind.primary_msg())
-        .with_secondary_msg(err_kind.secondary_msg())
-        .with_context(context.0, context.1)
-}
+    Diagnostic::new(
+        DiagnosticKind::Error,
+        0,
+        err_kind.primary_msg(),
+        err_kind.secondary_msg(),
+        span,
+    )
+    .with_context(context.0, context.1)
+} */
 
 #[derive(Debug)]
 pub struct DiagnosticReporter {
@@ -454,11 +385,13 @@ impl DiagnosticReporter {
         }
     }
 
-    pub fn add(&mut self, diagnostic: Diagnostic) {
-        if diagnostic.kind == DiagnosticKind::Error {
+    pub fn add(&mut self, diagnostic: Diagnostic, file_id: FileId) {
+        if diagnostic.is_err() {
             self.error += 1;
         }
-        self.diagnostics.push(diagnostic);
+        let mut diag = diagnostic;
+        diag.set_file_id(file_id);
+        self.diagnostics.push(diag);
     }
 
     pub fn has_error(&self) -> bool {

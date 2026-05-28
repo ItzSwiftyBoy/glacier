@@ -1,11 +1,13 @@
-use std::{fs::File, io::Read, path::Path};
+use std::{ffi::OsString, fs::File, io::Read, path::Path};
 
 use clap::Parser;
+use colored::Colorize;
 use compiler::Compiler;
 use lexer::Lexer;
 
 mod compiler;
 mod diagnostic;
+mod errors;
 // mod printer;
 mod utils;
 
@@ -19,7 +21,12 @@ pub fn get_file_content(filepath: &Path) -> String {
     let mut file = match File::open(filepath) {
         Ok(content) => content,
         Err(r) => {
-            eprintln!("Couldn't open the file. Reason: {}", r);
+            eprintln!(
+                "{}: Couldn't open `{}`. Reason: {}",
+                "Error".custom_color((230, 50, 50)),
+                filepath.display(),
+                r
+            );
             return String::new();
         }
     };
@@ -45,7 +52,7 @@ pub fn get_line_from_index(source: &str, index: usize) -> &str {
 #[command(version, about, long_about = None)]
 struct OliveArgs {
     #[arg(value_name = "FILE", required = true)]
-    file: String,
+    file: OsString,
 
     #[arg(long)]
     dump_ast: bool,
